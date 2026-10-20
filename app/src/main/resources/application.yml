@@ -1,0 +1,10 @@
+spring:
+  application:
+    name: lld-app
+
+lld:
+  rate-limit:
+    algorithm: TOKEN_BUCKET        # TOKEN_BUCKET | SLIDING_WINDOW_LOG | SLIDING_WINDOW_COUNTER
+    permits: 5
+    window: 1s
+    eviction-interval: 30s         # idle-key eviction is lossless; this only trades memory vs scan cost
