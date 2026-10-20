@@ -1,0 +1,216 @@
+@startuml Stack Overflow Class Diagram
+
+package "Model Layer" {
+    class User {
+        - Long id
+        - String username
+        - String email
+        - int reputation
+        - Instant createdAt
+        + void addReputation(int)
+    }
+
+    class Question {
+        - Long id
+        - String title
+        - String body
+        - Long authorId
+        - Set<String> tags
+        - Instant createdAt
+        - Instant updatedAt
+        - AtomicInteger voteCount
+        - Long acceptedAnswerId
+        + void incrementVotes()
+        + void decrementVotes()
+        + void setAcceptedAnswer(Long)
+    }
+
+    class Answer {
+        - Long id
+        - Long questionId
+        - String body
+        - Long authorId
+        - Instant createdAt
+        - AtomicInteger voteCount
+        - boolean accepted
+        + void incrementVotes()
+        + void decrementVotes()
+        + void markAccepted()
+    }
+
+    class Comment {
+        - Long id
+        - Long targetId
+        - CommentType targetType
+        - String body
+        - Long authorId
+        - Instant createdAt
+    }
+
+    enum CommentType {
+        QUESTION
+        ANSWER
+    }
+
+    class Vote {
+        - String id
+        - Long userId
+        - Long targetId
+        - VoteType targetType
+        - VoteValue value
+        - Instant createdAt
+    }
+
+    enum VoteType {
+        QUESTION
+        ANSWER
+    }
+
+    enum VoteValue {
+        UPVOTE(+1)
+        DOWNVOTE(-1)
+    }
+
+    class Tag {
+        - String name
+        - AtomicInteger usageCount
+        + void incrementUsage()
+    }
+}
+
+package "Service Layer" {
+    class UserService {
+        - ConcurrentHashMap<Long, User> users
+        - AtomicLong userIdCounter
+        + User createUser(String, String)
+        + Optional<User> getUser(Long)
+        + void updateReputation(Long, int)
+    }
+
+    class QuestionService {
+        - ConcurrentHashMap<Long, Question> questions
+        - ConcurrentHashMap<Long, List<Answer>> answersByQuestion
+        - ConcurrentHashMap<Long, List<Comment>> commentsByTarget
+        - AtomicLong questionIdCounter
+        - TagService tagService
+        - VoteService voteService
+        + Question postQuestion(Long, String, String, Set<String>)
+        + Optional<Question> getQuestion(Long)
+        + List<Question> searchByKeywords(String)
+        + List<Question> searchByTag(String)
+        + List<Question> getQuestionsByUser(Long)
+        + void acceptAnswer(Long, Long)
+    }
+
+    class AnswerService {
+        - ConcurrentHashMap<Long, Answer> answers
+        - AtomicLong answerIdCounter
+        + Answer postAnswer(Long, Long, String)
+        + Optional<Answer> getAnswer(Long)
+        + List<Answer> getAnswersByQuestion(Long)
+    }
+
+    class CommentService {
+        - ConcurrentHashMap<Long, Comment> comments
+        - AtomicLong commentIdCounter
+        + Comment addComment(Long, Long, CommentType, String)
+        + List<Comment> getComments(Long, CommentType)
+    }
+
+    class VoteService {
+        - ConcurrentHashMap<String, Vote> votes
+        - ReentrantReadWriteLock voteLock
+        + void upvote(Long, Long, VoteType)
+        + void downvote(Long, Long, VoteType)
+        + void removeVote(Long, Long, VoteType)
+        - void applyVote(Vote, int)
+    }
+
+    class TagService {
+        - ConcurrentHashMap<String, Tag> tags
+        + void addTags(Set<String>)
+        + List<Tag> getPopularTags(int)
+        + Optional<Tag> getTag(String)
+    }
+
+    class SearchService {
+        - QuestionService questionService
+        + List<Question> search(SearchCriteria)
+    }
+}
+
+package "Controller Layer" {
+    class UserController {
+        - UserService userService
+        + ResponseEntity<User> createUser(UserRequest)
+        + ResponseEntity<User> getUser(Long)
+    }
+
+    class QuestionController {
+        - QuestionService questionService
+        + ResponseEntity<Question> postQuestion(QuestionRequest)
+        + ResponseEntity<Question> getQuestion(Long)
+        + ResponseEntity<List<Question>> searchQuestions(String)
+    }
+
+    class AnswerController {
+        - AnswerService answerService
+        + ResponseEntity<Answer> postAnswer(AnswerRequest)
+    }
+
+    class VoteController {
+        - VoteService voteService
+        + ResponseEntity<Void> upvote(VoteRequest)
+        + ResponseEntity<Void> downvote(VoteRequest)
+    }
+}
+
+package "DTO Layer" {
+    record UserRequest {
+        - String username
+        - String email
+    }
+
+    record QuestionRequest {
+        - Long authorId
+        - String title
+        - String body
+        - Set<String> tags
+    }
+
+    record AnswerRequest {
+        - Long questionId
+        - Long authorId
+        - String body
+    }
+
+    record VoteRequest {
+        - Long userId
+        - Long targetId
+        - VoteType targetType
+    }
+
+    record SearchCriteria {
+        - String keyword
+        - String tag
+        - Long userId
+    }
+}
+
+QuestionService --> Question
+QuestionService --> TagService
+QuestionService --> VoteService
+AnswerService --> Answer
+CommentService --> Comment
+VoteService --> Vote
+VoteService --> QuestionService
+VoteService --> AnswerService
+UserService --> User
+TagService --> Tag
+
+QuestionController --> QuestionService
+AnswerController --> AnswerService
+UserController --> UserService
+VoteController --> VoteService
+
+@enduml

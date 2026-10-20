@@ -1,0 +1,182 @@
+@startuml Vehicle Entry Sequence
+
+title Sequence 1: Vehicle Entry
+
+actor Customer
+participant "ParkingLotController" as Controller
+participant "ParkingLotService" as Service
+participant "ParkingLevel" as Level
+participant "ParkingSpot" as Spot
+participant "FeeCalculator" as Fee
+database "ActiveTickets" as Tickets
+
+Customer -> Controller: POST /api/parking/entry\n{licensePlate, type}
+activate Controller
+
+Controller -> Service: parkVehicle(vehicle)
+activate Service
+
+Service -> Service: Generate Correlation ID
+
+loop for each level
+    Service -> Level: findAvailableSpot(vehicleType)
+    activate Level
+
+    Level -> Level: stream spots\nfilter by type & status
+
+    alt Spot Found
+        Level --> Service: Optional<ParkingSpot>
+    else No Spot
+        Level --> Service: Optional.empty()
+    end
+    deactivate Level
+end
+
+alt Spot Available
+    Service -> Spot: occupy(vehicle)
+    activate Spot
+    Spot -> Spot: CAS status update\nAVAILABLE → OCCUPIED
+    Spot -> Spot: set currentVehicle
+    deactivate Spot
+
+    Service -> Service: ticketCounter.incrementAndGet()
+    Service -> Service: create Ticket with\nentryTime = Instant.now()
+
+    Service -> Tickets: put(ticketId, ticket)
+    Service -> Service: meterRegistry.counter++
+
+    Service --> Controller: Ticket
+    Controller --> Customer: 200 OK\n{ticketId, entryTime, spotId}
+
+else No Spot Available
+    Service --> Controller: NoSpotAvailableException
+    Controller --> Customer: 503 Service Unavailable\n"No spots available"
+end
+
+deactivate Service
+deactivate Controller
+
+@enduml
+
+@startuml Vehicle Exit Sequence
+
+title Sequence 2: Vehicle Exit and Fee Calculation
+
+actor Customer
+participant "ParkingLotController" as Controller
+participant "ParkingLotService" as Service
+participant "FeeCalculator" as Fee
+participant "ParkingSpot" as Spot
+database "ActiveTickets" as Tickets
+
+Customer -> Controller: POST /api/parking/exit/{ticketId}
+activate Controller
+
+Controller -> Service: exitVehicle(ticketId)
+activate Service
+
+Service -> Service: Generate Correlation ID
+
+Service -> Tickets: get(ticketId)
+
+alt Valid Ticket
+    Tickets --> Service: Ticket
+
+    Service -> Service: exitTime = Instant.now()
+    Service -> Fee: calculateFee(ticket, exitTime)
+    activate Fee
+
+    Fee -> Fee: duration = Duration.between\n(entryTime, exitTime)
+    Fee -> Fee: hours = ceil(duration.toMinutes() / 60.0)
+    Fee -> Fee: fee = hours * hourlyRate[vehicleType]
+
+    Fee --> Service: fee
+    deactivate Fee
+
+    Service -> Service: spotRegistry.get(spotId)
+    Service -> Spot: release()
+    activate Spot
+    Spot -> Spot: CAS status update\nOCCUPIED → AVAILABLE
+    Spot -> Spot: currentVehicle = null
+    deactivate Spot
+
+    Service -> Tickets: remove(ticketId)
+    Service -> Service: meterRegistry.counter++
+
+    Service --> Controller: fee
+    Controller --> Customer: 200 OK\n{ticketId, fee, exitTime}
+
+else Invalid Ticket
+    Tickets --> Service: null
+    Service --> Controller: InvalidTicketException
+    Controller --> Customer: 404 Not Found\n"Invalid ticket"
+end
+
+deactivate Service
+deactivate Controller
+
+@enduml
+
+@startuml Check Availability Sequence
+
+title Sequence 3: Real-time Availability Check (Concurrent)
+
+actor Customer1
+actor Customer2
+participant "ParkingLotController" as Controller
+participant "ParkingLotService" as Service
+participant "ParkingLevel" as Level
+
+par Concurrent Requests
+    Customer1 -> Controller: GET /api/parking/availability
+    activate Controller
+
+    Controller -> Service: getAvailability()
+    activate Service
+
+    loop for each level
+        Service -> Level: getAvailableCount()
+        activate Level
+        Level -> Level: stream spots\ngroup by type\ncount if AVAILABLE
+        Level --> Service: Map<VehicleType, Long>
+        deactivate Level
+    end
+
+    Service -> Service: aggregate counts
+    Service --> Controller: Map<VehicleType, Long>
+    deactivate Service
+
+    Controller --> Customer1: 200 OK\n{availability, timestamp}
+    deactivate Controller
+
+else
+    Customer2 -> Controller: GET /api/parking/availability
+    activate Controller
+
+    Controller -> Service: getAvailability()
+    activate Service
+
+    loop for each level
+        Service -> Level: getAvailableCount()
+        activate Level
+        Level -> Level: stream spots\ngroup by type\ncount if AVAILABLE
+        Level --> Service: Map<VehicleType, Long>
+        deactivate Level
+    end
+
+    Service -> Service: aggregate counts
+    Service --> Controller: Map<VehicleType, Long>
+    deactivate Service
+
+    Controller --> Customer2: 200 OK\n{availability, timestamp}
+    deactivate Controller
+end
+
+note right
+    Both requests execute
+    concurrently without
+    blocking. ConcurrentHashMap
+    ensures thread-safety.
+end note
+
+@enduml

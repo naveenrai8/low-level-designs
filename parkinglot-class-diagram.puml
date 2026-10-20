@@ -1,0 +1,119 @@
+@startuml Parking Lot Class Diagram
+
+package "Model Layer" {
+    enum VehicleType {
+        MOTORCYCLE
+        CAR
+        TRUCK
+    }
+
+    enum SpotStatus {
+        AVAILABLE
+        OCCUPIED
+    }
+
+    record Vehicle {
+        - String licensePlate
+        - VehicleType type
+    }
+
+    class ParkingSpot {
+        - String spotId
+        - VehicleType allowedType
+        - SpotStatus status
+        - int level
+        - Vehicle currentVehicle
+        + boolean isAvailable()
+        + void occupy(Vehicle)
+        + void release()
+    }
+
+    class ParkingLevel {
+        - int levelNumber
+        - ConcurrentHashMap<String, ParkingSpot> spots
+        + Optional<ParkingSpot> findAvailableSpot(VehicleType)
+        + Map<VehicleType, Long> getAvailableCount()
+        + void addSpot(ParkingSpot)
+    }
+
+    record Ticket {
+        - String ticketId
+        - String vehicleLicensePlate
+        - VehicleType vehicleType
+        - String spotId
+        - Instant entryTime
+        - Instant exitTime
+        - double fee
+    }
+
+    class FeeCalculator {
+        - Map<VehicleType, Double> hourlyRates
+        + double calculateFee(Ticket, Instant)
+    }
+}
+
+package "Service Layer" {
+    class ParkingLotService {
+        - String name
+        - List<ParkingLevel> levels
+        - ConcurrentHashMap<String, Ticket> activeTickets
+        - ConcurrentHashMap<String, ParkingSpot> spotRegistry
+        - FeeCalculator feeCalculator
+        - AtomicLong ticketCounter
+        - MeterRegistry meterRegistry
+        + Ticket parkVehicle(Vehicle)
+        + double exitVehicle(String ticketId)
+        + Map<VehicleType, Long> getAvailability()
+        + Optional<Ticket> getTicket(String ticketId)
+    }
+}
+
+package "Controller Layer" {
+    class ParkingLotController {
+        - ParkingLotService service
+        + ResponseEntity<Ticket> parkVehicle(VehicleRequest)
+        + ResponseEntity<ExitResponse> exitVehicle(String)
+        + ResponseEntity<AvailabilityResponse> getAvailability()
+    }
+}
+
+package "DTO Layer" {
+    record VehicleRequest {
+        - String licensePlate
+        - VehicleType type
+    }
+
+    record ExitResponse {
+        - String ticketId
+        - double fee
+        - Instant exitTime
+    }
+
+    record AvailabilityResponse {
+        - Map<VehicleType, Long> availability
+        - Instant timestamp
+    }
+}
+
+package "Exception Layer" {
+    class ParkingException <<exception>>
+    class NoSpotAvailableException <<exception>>
+    class InvalidTicketException <<exception>>
+}
+
+ParkingLotService *-- "1..*" ParkingLevel
+ParkingLevel *-- "1..*" ParkingSpot
+ParkingLotService *-- "1" FeeCalculator
+ParkingLotService ..> Ticket : creates
+ParkingSpot --> VehicleType
+ParkingSpot --> SpotStatus
+ParkingSpot --> Vehicle
+Ticket --> VehicleType
+FeeCalculator ..> Ticket
+ParkingLotController --> ParkingLotService
+ParkingLotController ..> VehicleRequest
+ParkingLotController ..> ExitResponse
+ParkingLotController ..> AvailabilityResponse
+ParkingLotService ..> ParkingException
+
+@enduml

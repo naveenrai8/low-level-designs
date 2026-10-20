@@ -1,0 +1,239 @@
+@startuml Post Question Sequence
+
+title Sequence 1: Post a Question with Tags
+
+actor User
+participant QuestionController
+participant QuestionService
+participant TagService
+database Questions
+database Tags
+
+User -> QuestionController: POST /api/questions\n{title, body, tags, authorId}
+activate QuestionController
+
+QuestionController -> QuestionService: postQuestion(authorId, title, body, tags)
+activate QuestionService
+
+QuestionService -> QuestionService: questionId = idCounter.incrementAndGet()
+QuestionService -> QuestionService: create Question object
+
+QuestionService -> TagService: addTags(tags)
+activate TagService
+
+loop for each tag
+    TagService -> Tags: computeIfAbsent(tag, new Tag)
+    Tags --> TagService: Tag
+    TagService -> TagService: tag.incrementUsage()
+end
+
+TagService --> QuestionService: tags processed
+deactivate TagService
+
+QuestionService -> Questions: put(questionId, question)
+QuestionService --> QuestionController: Question
+deactivate QuestionService
+
+QuestionController --> User: 201 Created\n{questionId, title, tags, createdAt}
+deactivate QuestionController
+
+@enduml
+
+@startuml Answer and Voting Sequence
+
+title Sequence 2: Answer Question and Voting
+
+actor User1 as "Author"
+actor User2 as "Voter"
+participant AnswerController
+participant AnswerService
+participant VoteController
+participant VoteService
+participant UserService
+database Answers
+database Votes
+database Users
+
+Author -> AnswerController: POST /api/answers\n{questionId, body, authorId}
+activate AnswerController
+
+AnswerController -> AnswerService: postAnswer(questionId, authorId, body)
+activate AnswerService
+
+AnswerService -> AnswerService: answerId = idCounter.incrementAndGet()
+AnswerService -> Answers: put(answerId, answer)
+AnswerService --> AnswerController: Answer
+deactivate AnswerService
+
+AnswerController --> Author: 201 Created\n{answerId, body}
+deactivate AnswerController
+
+== Voting Phase ==
+
+Voter -> VoteController: POST /api/votes/upvote\n{userId, targetId, targetType}
+activate VoteController
+
+VoteController -> VoteService: upvote(userId, targetId, targetType)
+activate VoteService
+
+VoteService -> VoteService: acquire write lock
+VoteService -> VoteService: check existing vote
+
+alt No Previous Vote
+    VoteService -> VoteService: create new Vote(UPVOTE)
+    VoteService -> Votes: put(voteKey, vote)
+
+    VoteService -> AnswerService: answer.incrementVotes()
+    activate AnswerService
+    AnswerService -> AnswerService: voteCount.incrementAndGet()
+    deactivate AnswerService
+
+    VoteService -> UserService: updateReputation(authorId, +10)
+    activate UserService
+    UserService -> Users: user.addReputation(10)
+    deactivate UserService
+
+else Vote Exists (same direction)
+    VoteService --> VoteController: AlreadyVotedException
+else Vote Exists (opposite direction)
+    VoteService -> VoteService: remove old vote
+    VoteService -> AnswerService: answer.decrementVotes()
+    VoteService -> VoteService: apply new vote
+    VoteService -> AnswerService: answer.incrementVotes()
+end
+
+VoteService -> VoteService: release lock
+VoteService --> VoteController: success
+deactivate VoteService
+
+VoteController --> Voter: 200 OK
+deactivate VoteController
+
+@enduml
+
+@startuml Search Sequence
+
+title Sequence 3: Search Questions (Concurrent)
+
+actor User1
+actor User2
+participant QuestionController
+participant SearchService
+participant QuestionService
+database Questions
+
+par Concurrent Searches
+    User1 -> QuestionController: GET /api/questions/search?keyword=java
+    activate QuestionController
+
+    QuestionController -> SearchService: search(criteria)
+    activate SearchService
+
+    SearchService -> QuestionService: searchByKeywords("java")
+    activate QuestionService
+
+    QuestionService -> Questions: stream values
+    QuestionService -> QuestionService: filter by keyword in title/body
+    QuestionService -> QuestionService: sort by votes DESC
+
+    QuestionService --> SearchService: List<Question>
+    deactivate QuestionService
+
+    SearchService --> QuestionController: results
+    deactivate SearchService
+
+    QuestionController --> User1: 200 OK\n[questions]
+    deactivate QuestionController
+
+else
+    User2 -> QuestionController: GET /api/questions/search?tag=spring
+    activate QuestionController
+
+    QuestionController -> SearchService: search(criteria)
+    activate SearchService
+
+    SearchService -> QuestionService: searchByTag("spring")
+    activate QuestionService
+
+    QuestionService -> Questions: stream values
+    QuestionService -> QuestionService: filter by tag
+    QuestionService -> QuestionService: sort by votes DESC
+
+    QuestionService --> SearchService: List<Question>
+    deactivate QuestionService
+
+    SearchService --> QuestionController: results
+    deactivate SearchService
+
+    QuestionController --> User2: 200 OK\n[questions]
+    deactivate QuestionController
+end
+
+note right
+    Both searches execute
+    concurrently. ConcurrentHashMap
+    ensures thread-safe reads.
+end note
+
+@enduml
+
+@startuml Accept Answer Sequence
+
+title Sequence 4: Accept Answer
+
+actor Author as "Question Author"
+participant QuestionController
+participant QuestionService
+participant AnswerService
+participant UserService
+database Questions
+database Answers
+database Users
+
+Author -> QuestionController: POST /api/questions/{qid}/accept/{aid}
+activate QuestionController
+
+QuestionController -> QuestionService: acceptAnswer(questionId, answerId)
+activate QuestionService
+
+QuestionService -> Questions: get(questionId)
+Questions --> QuestionService: Question
+
+alt Question Not Found
+    QuestionService --> QuestionController: QuestionNotFoundException
+else Question Found
+    QuestionService -> QuestionService: verify author
+
+    alt Not Author
+        QuestionService --> QuestionController: UnauthorizedException
+    else Is Author
+        QuestionService -> AnswerService: getAnswer(answerId)
+        activate AnswerService
+        AnswerService -> Answers: get(answerId)
+        Answers --> AnswerService: Answer
+        AnswerService --> QuestionService: Answer
+        deactivate AnswerService
+
+        QuestionService -> QuestionService: question.setAcceptedAnswer(answerId)
+        QuestionService -> Questions: update question
+
+        QuestionService -> AnswerService: markAccepted(answerId)
+        activate AnswerService
+        AnswerService -> Answers: answer.setAccepted(true)
+        deactivate AnswerService
+
+        QuestionService -> UserService: updateReputation(answerAuthorId, +15)
+        activate UserService
+        UserService -> Users: user.addReputation(15)
+        deactivate UserService
+
+        QuestionService --> QuestionController: success
+    end
+end
+
+deactivate QuestionService
+
+QuestionController --> Author: 200 OK
+deactivate QuestionController
+
+@enduml
