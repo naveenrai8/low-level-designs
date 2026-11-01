@@ -8,8 +8,14 @@ import java.util.ConcurrentModificationException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Proves the naive event bus breaks when a listener throws or unsubscribes mid-publish, and the isolating bus does not.
+ */
 class EventBusTest {
 
+    /**
+     * Proves that one throwing listener stops the later listeners and the exception escapes into the publisher.
+     */
     @Test
     void bugOneThrowingListenerStopsTheRestAndFailsThePublisher() {
         List<String> got = new ArrayList<>();
@@ -22,10 +28,13 @@ class EventBusTest {
         assertEquals(List.of("billing:order-1"), got, "email never ran");
     }
 
+    /**
+     * Proves that with two listeners, a listener that unsubscribes itself makes the loop end early, so the last listener is skipped with no error anywhere.
+     * <p>With 2 listeners there is no exception: after the removal, the ArrayList iterator sees cursor equal to size, so {@code hasNext()} is false and the loop just ends.
+     */
     @Test
     void bugListenerUnsubscribingItselfDuringDispatchSilentlySkipsTheNextListener() {
-        // With 2 listeners there is no exception: after the removal, ArrayList's iterator sees
-        // cursor == size, so hasNext() is false and the loop just ends. The last listener never runs.
+        // With 2 listeners there is no exception: after the removal, ArrayList's iterator sees cursor == size, so hasNext() is false and the loop just ends. The last listener never runs.
         List<String> got = new ArrayList<>();
         EventBus<String> bus = new NaiveEventBus<>();
         Runnable[] handle = new Runnable[1];
@@ -36,6 +45,9 @@ class EventBusTest {
         assertEquals(List.of("once:1"), got, "'always' was skipped, with no error anywhere");
     }
 
+    /**
+     * Proves that with three listeners the same self-unsubscribe throws {@code ConcurrentModificationException}.
+     */
     @Test
     void bugWithThreeListenersTheSameUnsubscribeThrowsCme() {
         EventBus<String> bus = new NaiveEventBus<>();
@@ -47,6 +59,9 @@ class EventBusTest {
         assertThrows(ConcurrentModificationException.class, () -> bus.publish("x"));
     }
 
+    /**
+     * Proves that every listener runs when one throws, the publisher does not throw, and the failure goes to the error handler.
+     */
     @Test
     void fixEveryListenerRunsAndTheFailureIsReportedNotSwallowed() {
         List<String> got = new ArrayList<>();
@@ -61,6 +76,9 @@ class EventBusTest {
         assertEquals(List.of("order-1:analytics down"), errors);
     }
 
+    /**
+     * Proves that unsubscribing during a publish is safe: the listener still gets that event and is gone from the next publish.
+     */
     @Test
     void fixUnsubscribingDuringDispatchIsSafeAndTakesEffectNextPublish() {
         List<String> got = new ArrayList<>();

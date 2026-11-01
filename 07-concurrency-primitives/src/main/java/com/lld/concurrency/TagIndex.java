@@ -2,11 +2,18 @@ package com.lld.concurrency;
 
 import java.util.Set;
 
-/** tag → items, written and read concurrently. */
+/**
+ * Maps a tag to its items, written and read from many threads at once.
+ */
 public interface TagIndex {
 
+    /**
+     * Files the item under the tag.
+     */
     void tag(String tag, String item);
 
-    /** An immutable snapshot; later writes don't show up in it. */
+    /**
+     * Returns an immutable snapshot of the tag's items. Later writes do not show up in it.
+     */
     Set<String> itemsTagged(String tag);
 }

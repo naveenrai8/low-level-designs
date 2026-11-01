@@ -16,6 +16,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Proves the hold registry at its time boundaries and under concurrency, using virtual time so a 10-minute TTL runs in microseconds.
+ */
 class HoldRegistryTest {
 
     private static final Instant T0 = Instant.parse("2026-03-08T09:00:00Z");
@@ -26,6 +29,9 @@ class HoldRegistryTest {
 
     // ---- Boundary: half-open [created, expiresAt) ----------------------------------------------
 
+    /**
+     * Proves the hold is still active one nanosecond before expiry and gone at exactly the expiry instant, even though the sweep has not run.
+     */
     @Test
     void fixHoldIsActiveOneNanoBeforeExpiryAndGoneAtExactlyExpiry() {
         HoldRegistry holds = new ExpiringHoldRegistry(clock, scheduler, TTL);
@@ -40,6 +46,9 @@ class HoldRegistryTest {
         assertEquals("bob", holds.tryHold("7A", "bob").orElseThrow().user());
     }
 
+    /**
+     * Proves that the closed-interval bug keeps the old holder at exactly the expiry instant and turns the next user away from a free seat.
+     */
     @Test
     void bugInclusiveExpiryStillBlocksTheSeatAtExactlyExpiry() {
         HoldRegistry holds = new InclusiveExpiryHoldRegistry(clock, scheduler, TTL);
@@ -52,6 +61,9 @@ class HoldRegistryTest {
 
     // ---- Stale timers: a timer must remove only the hold it was created for ---------------------
 
+    /**
+     * Proves that an early-released hold's timer deletes the next user's hold when it removes by seat only.
+     */
     @Test
     void bugStaleTimerDeletesTheNextUsersHold() {
         HoldRegistry holds = new StaleTimerHoldRegistry(clock, scheduler, TTL);
@@ -67,6 +79,9 @@ class HoldRegistryTest {
         assertTrue(holds.tryHold("7A", "carol").isPresent(), "bug: the seat bob is paying for is resold");
     }
 
+    /**
+     * Proves that the old timer does nothing to the next user's hold, and that the next user's own timer still cleans up later.
+     */
     @Test
     void fixStaleTimerLeavesTheNextUsersHoldAlone() {
         HoldRegistry holds = new ExpiringHoldRegistry(clock, scheduler, TTL);
@@ -86,6 +101,9 @@ class HoldRegistryTest {
 
     // ---- Memory: the sweep keeps the map bounded -----------------------------------------------
 
+    /**
+     * Proves that 1,000 holds are all swept after one advance of the TTL, leaving no entries and no pending timers.
+     */
     @Test
     void fixExpiredHoldsAreSweptSoMemoryStaysBounded() {
         HoldRegistry holds = new ExpiringHoldRegistry(clock, scheduler, TTL);
@@ -102,6 +120,10 @@ class HoldRegistryTest {
 
     // ---- Concurrency: exactly one winner per seat ------------------------------------------------
 
+    /**
+     * Proves that when 32 threads ask for the same seat at once, exactly one gets it.
+     * <p>The manual scheduler is single-threaded, so this test replaces it with a stub. It only tests {@code tryHold}.
+     */
     @Test
     void fixExactlyOneOfManyConcurrentUsersWinsTheSeat() throws Exception {
         // ManualScheduler is single-threaded, so this test stubs the scheduler out: it is about tryHold only.

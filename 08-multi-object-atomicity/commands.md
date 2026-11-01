@@ -11,6 +11,4 @@ jps -l                              # find the pid
 jcmd <pid> Thread.print | tail -40  # look for "Found one Java-level deadlock" and the lock owners
 ```
 
-Experiment: in `OrderedLockingBank.transfer`, replace the ordered `first`/`second` with
-`from`/`to`. `fixOrderedLockingCompletesOpposingTransfers` then hangs until its `join` timeout,
-and `fixConservesMoneyExactly…` fails its 30-second `Future.get`. Ordering is the whole fix.
+Experiment: in `OrderedLockingBank.transfer`, replace the ordered `first`/`second` with `from`/`to`. `fixOrderedLockingCompletesOpposingTransfers` then hangs until its `join` timeout, and `fixConservesMoneyExactly…` fails its 30-second `Future.get`. Ordering is the whole fix.

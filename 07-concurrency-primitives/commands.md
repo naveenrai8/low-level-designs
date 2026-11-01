@@ -15,13 +15,11 @@ jps -l
 jcmd <pid> Thread.print
 ```
 
-Why force the interleaving? Measured on an Apple-silicon laptop, 20 runs each, the broken
-`CheckThenActSeatMap` **without** the barrier hook (`RaceWindow.NONE`):
+Why force the interleaving? Measured on an Apple-silicon laptop, 20 runs each, the broken `CheckThenActSeatMap` **without** the barrier hook (`RaceWindow.NONE`):
 
 | Setup | Runs that double-booked |
 |---|---|
 | 2 threads, 1 seat (the "obvious" race test) | **2 of 20**, so this test passes 90% of the time against broken code |
 | 32 threads × 1,000 seats | 20 of 20 (66 to 1,170 extra "winners" per run) |
 
-A small race test that passes proves almost nothing. Either force the interleaving at a seam
-(deterministic) or apply enough contention that the fix test's exact assertion means something.
+A small race test that passes proves almost nothing. Either force the interleaving at a seam (deterministic) or apply enough contention that the fix test's exact assertion means something.

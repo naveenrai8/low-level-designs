@@ -10,11 +10,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Proves the check-then-act seat map double books and the atomic one does not.
+ */
 class SeatMapTest {
 
     /**
-     * Deterministic, not probabilistic: the barrier only opens once BOTH threads have passed the
-     * "is it free?" check, so both are guaranteed to act on a stale answer.
+     * Proves that two threads can both be told they booked seat 7.
+     * <p>This is deterministic, not probabilistic: the barrier only opens once both threads have passed the "is it free?" check, so both are guaranteed to act on a stale answer.
      */
     @Test
     void bugCheckThenActDoubleBooksWhenTwoThreadsShareTheWindow() throws Exception {
@@ -32,6 +35,9 @@ class SeatMapTest {
         assertEquals(2, winners.get(), "both users were told they hold seat 7");
     }
 
+    /**
+     * Proves that with 32 threads fighting over 100 seats, each seat has exactly one winner, and the winner is the user who really holds it.
+     */
     @Test
     void fixExactlyOneWinnerPerSeatUnderHeavyContention() throws Exception {
         SeatMap seats = new AtomicSeatMap();
@@ -58,6 +64,9 @@ class SeatMapTest {
         assertTrue(true);
     }
 
+    /**
+     * Waits at the barrier for up to 5 seconds and turns any failure into an unchecked exception so it can be used inside a lambda.
+     */
     private static void await(CyclicBarrier barrier) {
         try {
             barrier.await(5, TimeUnit.SECONDS);

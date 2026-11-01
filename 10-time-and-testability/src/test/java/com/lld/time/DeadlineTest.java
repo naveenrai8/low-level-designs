@@ -10,8 +10,7 @@ import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 /**
- * One scenario, two time sources. The wall clock is stepped (NTP correction) while real elapsed
- * time, the ticker, moves normally.
+ * One scenario, two time sources. The wall clock is stepped (an NTP correction) while real elapsed time, the ticker, moves normally.
  */
 class DeadlineTest {
 
@@ -20,11 +19,17 @@ class DeadlineTest {
     private final MutableClock wall = new MutableClock(Instant.parse("2026-03-08T09:00:00Z"));
     private final ManualTicker ticker = new ManualTicker();
 
+    /**
+     * Lets real time pass: moves both the wall clock and the ticker by the same amount.
+     */
     private void elapse(Duration real) {
         wall.advance(real);
         ticker.advance(real);
     }
 
+    /**
+     * Proves that a wall-clock timeout is still waiting after 32 real seconds when the clock was stepped back an hour.
+     */
     @Test
     void bugWallClockDeadlineNeverFiresWhenTheClockStepsBack() {
         Deadline deadline = new WallClockDeadline(wall, TIMEOUT);
@@ -36,6 +41,9 @@ class DeadlineTest {
         assertTrue(deadline.remaining().compareTo(Duration.ofMinutes(59)) > 0);
     }
 
+    /**
+     * Proves that a wall-clock timeout of 10 seconds fires after 1 millisecond when the clock was stepped forward.
+     */
     @Test
     void bugWallClockDeadlineFiresAtOnceWhenTheClockStepsForward() {
         Deadline deadline = new WallClockDeadline(wall, TIMEOUT);
@@ -45,6 +53,9 @@ class DeadlineTest {
         assertTrue(deadline.hasExpired(), "bug: a 10 s timeout fired after 1 ms");
     }
 
+    /**
+     * Proves that the ticker-based timeout fires after exactly 10 real seconds, whatever the wall clock does.
+     */
     @Test
     void fixMonotonicDeadlineIgnoresWallClockSteps() {
         Deadline deadline = new MonotonicDeadline(ticker, TIMEOUT);
@@ -59,11 +70,17 @@ class DeadlineTest {
         assertEquals(Duration.ZERO, deadline.remaining());
     }
 
+    /**
+     * Proves that the test ticker rejects a negative advance, because a monotonic source never goes backwards.
+     */
     @Test
     void manualTickerRefusesToGoBackwards() {
         assertThrows(IllegalArgumentException.class, () -> ticker.advance(Duration.ofNanos(-1)));
     }
 
+    /**
+     * Proves that the timeout still works when {@code nanoTime} wraps from a huge positive to a negative number, because it compares differences.
+     */
     @Test
     void monotonicDeadlineIsCorrectAcrossNanoTimeOverflow() {
         // nanoTime may start anywhere, including near Long.MAX_VALUE. Differences still work.

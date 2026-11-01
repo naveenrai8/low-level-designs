@@ -8,3 +8,27 @@ lld:
     permits: 5
     window: 1s
     eviction-interval: 30s         # idle-key eviction is lossless; this only trades memory vs scan cost
+
+  booking:
+    hold-ttl: 5m                   # a hold is valid while now < expiresAt (half-open)
+    idempotency-ttl: 24h           # how long a confirm answer is replayable; bounds the key store
+    expired-hold-retention: 1h     # after this an expired hold id is 404 instead of 410
+    sweep-interval: 1m             # memory tidy-up only; never changes an answer
+
+  notify:
+    rate-limit-per-minute: 5       # per user, shared by all channels (Topic 21 token bucket)
+    max-attempts: 5                # channel calls per message before it goes to the DLQ
+    backoff-base: 1s               # first retry wait; doubles up to backoff-cap, with jitter
+    backoff-cap: 1m
+    jitter-seed: 42                # seeded so behaviour is repeatable
+    run-interval: 5s               # how often the worker sends what is due
+
+  gateway:
+    permits: 5                     # per client per route per window (Topic 21 token bucket)
+    window: 1m
+    max-attempts: 3                # upstream tries per request; only idempotent requests are retried
+    deadline: 5s                   # total time per request, retries included
+    per-try-timeout: 2s
+    breaker-min-calls: 4           # calls the per-upstream breaker must see before it may open (Topic 27)
+    breaker-open-wait: 30s
+    max-body-bytes: 1048576        # bigger bodies are 413 before routing or auth; the adapter reads at most this many bytes

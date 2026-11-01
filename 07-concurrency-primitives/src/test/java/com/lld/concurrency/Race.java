@@ -10,13 +10,21 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntFunction;
 
-/** Runs N tasks that all start at the same instant (a start gate), then waits for all of them. */
+/**
+ * Runs N tasks that all start at the same instant (a start gate), then waits for all of them.
+ */
 final class Race {
 
+    /**
+     * Not instantiable. This is a static helper only.
+     */
     private Race() {
     }
 
-    /** @return the first exception any worker threw, or null */
+    /**
+     * Runs one task per thread behind a start gate and waits up to 30 seconds for each to finish.
+     * <p>Returns the first exception any worker threw, or null if none did. Workers never throw out of the pool, so the caller must check the return value.
+     */
     static Throwable run(int threads, IntFunction<Runnable> taskForThread) throws Exception {
         CountDownLatch startGate = new CountDownLatch(1);
         AtomicReference<Throwable> firstFailure = new AtomicReference<>();

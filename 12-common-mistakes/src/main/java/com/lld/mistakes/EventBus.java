@@ -2,11 +2,20 @@ package com.lld.mistakes;
 
 import java.util.function.Consumer;
 
-/** In-process publish/subscribe (the Observer pattern). Topic 25 is the full pub-sub. */
+/**
+ * In-process publish/subscribe (the Observer pattern). Topic 25 is the full pub-sub.
+ */
 public interface EventBus<E> {
 
-    /** @return a handle that unsubscribes this listener. */
+    /**
+     * Registers a listener.
+     * 
+     * @return a handle that unsubscribes this listener.
+     */
     Runnable subscribe(Consumer<? super E> listener);
 
+    /**
+     * Sends the event to the listeners.
+     */
     void publish(E event);
 }

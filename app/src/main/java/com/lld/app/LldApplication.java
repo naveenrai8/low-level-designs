@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class LldApplication {
 
+    /** Starts the Spring Boot app, which serves every topic's REST adapter on one port. */
     public static void main(String[] args) {
         SpringApplication.run(LldApplication.class, args);
     }

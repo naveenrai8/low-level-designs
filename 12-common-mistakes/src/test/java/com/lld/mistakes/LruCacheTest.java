@@ -16,12 +16,17 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Proves why an LRU {@code get} is a write, that the plain-lock LRU behaves correctly, and that a segmented LRU is not a true LRU.
+ */
 class LruCacheTest {
 
+    /**
+     * Proves on one thread that {@code get} changes an access-ordered map: calling it while iterating fails fast. So a read lock around {@code get} would let two threads relink the same list at once.
+     */
     @Test
     void getOnAnAccessOrderedMapIsAStructuralWrite() {
-        // Single-threaded proof that "get" mutates: iterating while calling get() fails fast.
-        // So a read lock around get() lets two threads relink the same list at once.
+        // Single-threaded proof that "get" mutates: iterating while calling get() fails fast. So a read lock around get() lets two threads relink the same list at once.
         Map<String, Integer> lru = new LinkedHashMap<>(16, 0.75f, true);
         lru.put("a", 1);
         lru.put("b", 2);
@@ -32,6 +37,9 @@ class LruCacheTest {
         });
     }
 
+    /**
+     * Proves that reading an entry saves it from eviction, so the entry that was used least recently is the one removed.
+     */
     @Test
     void evictsTheLeastRecentlyUsedNotTheLeastRecentlyInserted() {
         LruCache<String, Integer> cache = new LruCache<>(2);
@@ -44,6 +52,9 @@ class LruCacheTest {
         assertTrue(cache.containsKey("c"));
     }
 
+    /**
+     * Proves that 8 threads doing 50,000 mixed gets and puts never corrupt the list and leave the size exactly at capacity.
+     */
     @Test
     void staysWithinCapacityUnderConcurrentGetsAndPuts() throws Exception {
         LruCache<Integer, Integer> cache = new LruCache<>(100);
@@ -72,6 +83,10 @@ class LruCacheTest {
         }
     }
 
+    /**
+     * Proves that the segmented cache evicts while it still has room, and evicts a newer entry before the globally oldest one.
+     * <p>Capacity 4 in 2 segments of 2. Integer keys hash to themselves, so keys 0, 2 and 4 all land in segment 0.
+     */
     @Test
     void segmentedLruEvictsEarlyAndOutOfGlobalOrder() {
         // Capacity 4 in 2 segments of 2. Integer keys hash to themselves: 0, 2, 4 all land in segment 0.

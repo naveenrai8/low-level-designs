@@ -2,11 +2,18 @@ package com.lld.time;
 
 import java.time.Duration;
 
-/** "Has this much time passed since I started?" The question behind every timeout. */
+/**
+ * Answers "has this much time passed since I started?", the question behind every timeout.
+ */
 public interface Deadline {
 
+    /**
+     * Says whether the timeout has run out.
+     */
     boolean hasExpired();
 
-    /** Time left, never negative. */
+    /**
+     * Returns the time left, never negative.
+     */
     Duration remaining();
 }

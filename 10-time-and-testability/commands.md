@@ -13,7 +13,4 @@ timedatectl timesync-status                # Linux with systemd-timesyncd
 chronyc tracking                           # Linux with chrony
 ```
 
-Experiment: rewrite `fixHoldIsActiveOneNanoBeforeExpiryAndGoneAtExactlyExpiry` the "usual" way,
-with `Clock.systemUTC()`, a 1-second TTL and `Thread.sleep(1_000)`. Point it at
-`InclusiveExpiryHoldRegistry` and it passes, because the sleep overshoots the boundary by a few
-milliseconds. The test gets slower and stops testing the thing it's named after.
+Experiment: rewrite `fixHoldIsActiveOneNanoBeforeExpiryAndGoneAtExactlyExpiry` the "usual" way, with `Clock.systemUTC()`, a 1-second TTL and `Thread.sleep(1_000)`. Point it at `InclusiveExpiryHoldRegistry` and it passes, because the sleep overshoots the boundary by a few milliseconds. The test gets slower and stops testing the thing it's named after.

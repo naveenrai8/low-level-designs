@@ -5,16 +5,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.time.temporal.Temporal;
+
+import com.lld.ratelimiter.algorithm.SlidingWindowCounter;
+import com.lld.ratelimiter.algorithm.SlidingWindowLog;
+import com.lld.ratelimiter.algorithm.TokenBucket;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-/** The behaviour that distinguishes the algorithms — what you'd explain when asked "why this one?". */
+/** The behaviour that makes each algorithm different: what you'd explain when asked "why this one?". */
 class AlgorithmBehaviourTest {
 
     private final FakeTicker ticker = new FakeTicker();
 
+    /** Token bucket at 10 per second: a burst of 10, then one new token every 100 ms. */
     @Nested
     class TokenBucketBehaviour {
 
@@ -22,6 +28,7 @@ class AlgorithmBehaviourTest {
         private final RateLimiter limiter =
                 new KeyedRateLimiter<>(new TokenBucket(RateLimit.perSecond(10)), ticker);
 
+        /** Proves an empty bucket gains one token per 100 ms of waiting and never holds more than 10. */
         @ParameterizedTest(name = "after draining, wait {0}ms -> {1} tokens")
         @CsvSource({"0, 0", "99, 0", "100, 1", "250, 2", "1000, 10", "3600000, 10"})
         void refillsLinearlyAndCapsAtCapacity(long waitMillis, int expectedTokens) {
@@ -36,6 +43,7 @@ class AlgorithmBehaviourTest {
             assertEquals(expectedTokens, granted);
         }
 
+        /** Proves a denied request is told to wait exactly until the next token arrives (70 ms after waiting 30 ms). */
         @Test
         void retryAfterIsTimeUntilTheNextToken() {
             drain(limiter);
@@ -47,6 +55,7 @@ class AlgorithmBehaviourTest {
             assertEquals(Duration.ofMillis(70), d.retryAfter());
         }
 
+        /** Proves time already spent toward the next token is not thrown away when a refill happens. */
         @Test
         void partialProgressTowardTheNextTokenIsKept() {
             drain(limiter);
@@ -59,6 +68,7 @@ class AlgorithmBehaviourTest {
                     "advancing the refill point to 'now' instead would lose the 50ms");
         }
 
+        /** Proves a token bucket is not a "per window" cap: a full burst plus the refill lets 19 through inside one second. */
         @Test
         void isNotAPerWindowCapItAllowsNearlyTwiceTheLimitWithinOneWindow() {
             drain(limiter); // 10 at t=0 (the full burst capacity)
@@ -74,12 +84,14 @@ class AlgorithmBehaviourTest {
         }
     }
 
+    /** Sliding-window log at 5 per second: exact, because it remembers every grant time. */
     @Nested
     class SlidingWindowLogBehaviour {
 
         private final RateLimiter limiter =
                 new KeyedRateLimiter<>(new SlidingWindowLog(RateLimit.perSecond(5)), ticker);
 
+        /** Proves there is no double burst at a window edge, unlike a fixed window. */
         @Test
         void hasNoBoundaryBurst() {
             // A fixed 1s window would allow 5 at t=900ms and 5 more at t=1100ms: 10 in 200ms.
@@ -91,6 +103,7 @@ class AlgorithmBehaviourTest {
             assertFalse(limiter.tryAcquire("k").allowed());
         }
 
+        /** Proves a grant still counts 999 ms later and stops counting at exactly 1000 ms. */
         @Test
         void aGrantStopsCountingExactlyOneWindowLater() {
             drain(limiter);
@@ -102,6 +115,7 @@ class AlgorithmBehaviourTest {
             assertTrue(limiter.tryAcquire("k").allowed());
         }
 
+        /** Proves the wait is set by the last old grant that must leave the window to make room for the request. */
         @Test
         void retryAfterWaitsForTheLastGrantThatMustExpire() {
             limiter.tryAcquire("k", 2); // grants at t=0
@@ -115,12 +129,14 @@ class AlgorithmBehaviourTest {
         }
     }
 
+    /** Sliding-window counter at 10 per second: an estimate built from this window's count and a fading share of the last one. */
     @Nested
     class SlidingWindowCounterBehaviour {
 
         private final RateLimiter limiter =
                 new KeyedRateLimiter<>(new SlidingWindowCounter(RateLimit.perSecond(10)), ticker);
 
+        /** Proves halfway through the next window, the previous window's 10 requests count as 5, so 5 more are allowed. */
         @Test
         void weightsThePreviousWindowByItsRemainingOverlap() {
             drain(limiter); // 10 in window #1
@@ -134,6 +150,7 @@ class AlgorithmBehaviourTest {
             assertEquals(5, granted);
         }
 
+        /** Proves the wait is found by solving the estimate formula: 100 ms until one request fits again. */
         @Test
         void retryAfterSolvesTheEstimateFormula() {
             drain(limiter);
@@ -146,10 +163,7 @@ class AlgorithmBehaviourTest {
             assertEquals(Duration.ofMillis(100), d.retryAfter());
         }
 
-        /**
-         * The approximation assumes the previous window's requests were evenly spread. Cluster
-         * them at its very end and a true 1s window can see nearly 2x the limit.
-         */
+        /** Proves the estimate can be fooled: requests bunched at the end of one window let nearly 2× the limit into one real second. */
         @Test
         void isApproximateClusteredTrafficCanNearlyDoubleTheLimit() {
             limiter.tryAcquire("k"); // t=0 opens window #1 = [0, 1000)
@@ -175,6 +189,7 @@ class AlgorithmBehaviourTest {
         }
     }
 
+    /** Uses up every permit key "k" has right now, so a test can start from empty. */
     private static void drain(RateLimiter limiter) {
         while (limiter.tryAcquire("k").allowed()) {
             // consume every available permit

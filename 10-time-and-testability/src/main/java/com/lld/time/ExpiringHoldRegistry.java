@@ -9,18 +9,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * <b>Fix.</b> Time is injected ({@link Clock} for "now", {@link Scheduler} for "later"), so every
- * boundary is testable to the nanosecond. Two rules make it correct:
- *
+ * <b>Fix.</b> Time is injected ({@link Clock} for "now", {@link Scheduler} for "later"), so every boundary can be tested to the nanosecond. Two rules make it correct:
+ * 
  * <ol>
- *   <li><b>The read path decides.</b> {@link #isActive} checks expiry on every read against the
- *       half-open interval. The scheduled sweep is only memory cleanup, and it can fire late, or
- *       not at all after a restart, without anyone seeing an expired hold as active.</li>
- *   <li><b>Timers remove only what they created.</b> {@link #expiryTask} uses
- *       {@code remove(key, value)}, so a timer for an old hold can't delete the next user's hold
- *       on the same seat.</li>
+ *   <li><b>The read path decides.</b> {@link #isActive} checks expiry on every read against the half-open interval. The scheduled sweep is only memory cleanup, so it can fire late, or not at all after a restart, and nobody sees an expired hold as active.</li>
+ *   <li><b>Timers remove only what they created.</b> {@link #expiryTask} uses {@code remove(key, value)}, so a timer for an old hold cannot delete the next user's hold on the same seat.</li>
  * </ol>
- *
+ * 
  * <p>The two deliberately broken subclasses each override one rule.
  */
 public class ExpiringHoldRegistry implements HoldRegistry {
@@ -31,6 +26,9 @@ public class ExpiringHoldRegistry implements HoldRegistry {
     private final AtomicLong ids = new AtomicLong();
     protected final Map<String, Hold> holds = new ConcurrentHashMap<>();
 
+    /**
+     * Creates the registry. Throws {@code IllegalArgumentException} if the TTL is zero or negative.
+     */
     public ExpiringHoldRegistry(Clock clock, Scheduler scheduler, Duration ttl) {
         if (ttl.isNegative() || ttl.isZero()) {
             throw new IllegalArgumentException("ttl must be positive: " + ttl);
@@ -40,6 +38,10 @@ public class ExpiringHoldRegistry implements HoldRegistry {
         this.ttl = ttl;
     }
 
+    /**
+     * Gives the seat to the user if nobody holds it right now, and schedules cleanup for the new hold. Returns empty if an active hold exists.
+     * <p>Time is read inside the per-key lock, and the scheduling is done outside it so no foreign work runs under the map's lock.
+     */
     @Override
     public Optional<Hold> tryHold(String seat, String user) {
         Hold[] created = new Hold[1];
@@ -58,28 +60,41 @@ public class ExpiringHoldRegistry implements HoldRegistry {
         return Optional.of(created[0]);
     }
 
+    /**
+     * Returns the seat's hold only if it has not expired yet. An expired hold that the timer has not swept still counts as gone.
+     */
     @Override
     public Optional<Hold> activeHold(String seat) {
         Hold hold = holds.get(seat);
         return hold != null && isActive(hold, clock.instant()) ? Optional.of(hold) : Optional.empty();
     }
 
+    /**
+     * Gives the hold back early. Removes only this exact hold, so it returns false if the seat now belongs to someone else.
+     */
     @Override
     public boolean release(Hold hold) {
         return holds.remove(hold.seat(), hold);
     }
 
+    /**
+     * Counts entries still in memory, including expired ones the timer has not swept yet.
+     */
     @Override
     public int size() {
         return holds.size();
     }
 
-    /** Half-open {@code [createdAt, expiresAt)}: at exactly {@code expiresAt} the hold is gone. */
+    /**
+     * Half-open {@code [createdAt, expiresAt)}: at exactly {@code expiresAt} the hold is gone.
+     */
     protected boolean isActive(Hold hold, Instant now) {
         return now.isBefore(hold.expiresAt());
     }
 
-    /** Removes this exact hold, never whatever happens to occupy the seat when the timer fires. */
+    /**
+     * Builds the cleanup action for one hold. It removes this exact hold, never whatever happens to occupy the seat when the timer fires.
+     */
     protected Runnable expiryTask(Hold hold) {
         return () -> holds.remove(hold.seat(), hold);
     }

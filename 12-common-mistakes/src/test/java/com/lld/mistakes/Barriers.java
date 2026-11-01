@@ -5,11 +5,19 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+/**
+ * Test helpers that build {@link Gap}s out of barriers.
+ */
 final class Barriers {
 
+    /**
+     * Not instantiable. This is a static helper only.
+     */
     private Barriers() { }
 
-    /** A {@link Gap} that holds each thread until {@code parties} threads are inside the gap. */
+    /**
+     * Builds a {@link Gap} that holds each thread until {@code parties} threads are inside the gap, so the bad interleaving happens every run. Throws {@code IllegalStateException} if the threads never meet within 5 seconds.
+     */
     static Gap meetIn(int parties) {
         CyclicBarrier barrier = new CyclicBarrier(parties);
         return () -> {

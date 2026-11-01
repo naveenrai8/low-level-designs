@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.lld</groupId>
+        <artifactId>lld-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <!-- Topic 46 capstone. Framework-free glue: reuses Topic 21 (rate limiting) and Topic 27 (circuit breaker + retry); JUnit (inherited, test scope). -->
+    <artifactId>api-gateway-core</artifactId>
+    <name>46 - Capstone: API Gateway Core</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>rate-limiter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>circuit-breaker-and-retry</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+</project>

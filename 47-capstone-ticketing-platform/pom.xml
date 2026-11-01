@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.lld</groupId>
+        <artifactId>lld-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <!-- Topic 47 capstone. Framework-free glue: reuses Topic 31 (seat holds), Topic 32 (ledger for payment hold/capture) and Topic 44 (notifications); JUnit (inherited, test scope). -->
+    <artifactId>ticketing-platform</artifactId>
+    <name>47 - Capstone: Ticketing Platform</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>seat-hold-booking</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>double-entry-ledger</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>notification-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+</project>

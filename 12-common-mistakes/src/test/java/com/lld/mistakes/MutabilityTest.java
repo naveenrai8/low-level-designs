@@ -8,10 +8,16 @@ import java.util.ConcurrentModificationException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Proves that handing out internal lists breaks an invariant, and that snapshots and defensive copies fix it.
+ */
 class MutabilityTest {
 
     private static final LineItem PEN = new LineItem("pen", 150, 1);
 
+    /**
+     * Proves a caller can add a third line to a cart limited to two by editing the list that {@code items()} returned.
+     */
     @Test
     void bugReturningTheInternalListLetsCallersBypassTheInvariant() {
         LeakyCart cart = new LeakyCart(2);
@@ -23,6 +29,9 @@ class MutabilityTest {
         assertEquals(3, cart.items().size());
     }
 
+    /**
+     * Proves the read-only wrapper blocks writes but still shows later changes, and iterating it while the cart changes throws.
+     */
     @Test
     void bugUnmodifiableListIsALiveViewNotASnapshot() {
         LeakyCart cart = new LeakyCart(5);
@@ -39,6 +48,9 @@ class MutabilityTest {
         });
     }
 
+    /**
+     * Proves the snapshot cannot be changed and does not show later changes to the cart.
+     */
     @Test
     void fixSnapshotIsUnmodifiableAndDetached() {
         Cart cart = new Cart(5);
@@ -51,6 +63,9 @@ class MutabilityTest {
         assertEquals(2, cart.items().size());
     }
 
+    /**
+     * Proves the order record keeps its own copy of the list, so the caller's later edits do not change it.
+     */
     @Test
     void fixRecordCopiesItsMutableComponent() {
         List<LineItem> source = new ArrayList<>(List.of(PEN));
@@ -62,6 +77,9 @@ class MutabilityTest {
         assertThrows(UnsupportedOperationException.class, () -> order.items().clear());
     }
 
+    /**
+     * Proves the order record refuses a list that contains null.
+     */
     @Test
     void fixRecordRejectsNullElements() {
         List<LineItem> withNull = new ArrayList<>();

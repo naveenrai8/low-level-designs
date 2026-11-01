@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.lld</groupId>
+        <artifactId>lld-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <!-- Topic 48 capstone. Framework-free glue: reuses Topic 42 (workflow engine) and Topic 45 (content popularity); JUnit (inherited, test scope). -->
+    <artifactId>jira-lite</artifactId>
+    <name>48 - Capstone: Jira-lite</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>workflow-engine</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>content-popularity</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
+</project>

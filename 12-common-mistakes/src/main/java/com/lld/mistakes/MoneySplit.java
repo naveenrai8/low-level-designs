@@ -5,16 +5,20 @@ import java.util.Comparator;
 import java.util.stream.IntStream;
 
 /**
- * <b>Fix (M6).</b> Money in {@code long} minor units, split by the <em>largest remainder</em>
- * method. Every share starts at its floor, and the leftover units go one each to the shares with
- * the largest fractional remainder (ties go to the lower index, so the result is deterministic).
- * The shares always sum to the total exactly, and no share is off from its exact proportion by
- * one unit or more.
+ * <b>Fix (M6).</b> Money in {@code long} minor units, split by the <em>largest remainder</em> method.
+ * <p>Example: split 10,000 cents three ways. Each share starts at its floor, 3,333, which adds up to 9,999. One cent is left over. All three remainders tie, so the cent goes to the lowest index, giving [3334, 3333, 3333].
+ * <p>In general, every share starts at its floor, and the leftover units go one each to the shares with the largest fractional remainder (ties go to the lower index, so the result is deterministic). The shares always sum to the total exactly, and no share is one unit or more away from its exact proportion.
  */
 public final class MoneySplit {
 
+    /**
+     * Not instantiable. This is a static helper only.
+     */
     private MoneySplit() { }
 
+    /**
+     * Splits the total into equal parts. Throws {@code IllegalArgumentException} if parts is not positive.
+     */
     public static long[] equally(long totalMinor, int parts) {
         if (parts <= 0) {
             throw new IllegalArgumentException("parts must be positive: " + parts);
@@ -24,6 +28,9 @@ public final class MoneySplit {
         return byWeights(totalMinor, weights);
     }
 
+    /**
+     * Splits the total in proportion to the weights, handing out leftover units by largest remainder. Throws {@code IllegalArgumentException} for a negative total, a negative weight, or all-zero weights, and {@code ArithmeticException} on overflow instead of wrapping.
+     */
     public static long[] byWeights(long totalMinor, long[] weights) {
         if (totalMinor < 0) {
             throw new IllegalArgumentException("total must not be negative: " + totalMinor);

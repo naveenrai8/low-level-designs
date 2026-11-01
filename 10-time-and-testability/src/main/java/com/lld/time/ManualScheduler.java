@@ -6,15 +6,15 @@ import java.util.Comparator;
 import java.util.PriorityQueue;
 
 /**
- * Deterministic test {@link Scheduler}: tasks run only inside {@link #advance}, on the calling
- * thread, in due-time order (ties in scheduling order). It drives a {@link MutableClock}, so while
- * a task runs, {@code clock.instant()} equals that task's due time, just as it would in production
- * if the timer fired exactly on time.
- *
- * <p>Single-threaded by design. It's a test double, not a concurrent scheduler.
+ * Deterministic test {@link Scheduler}. Tasks run only inside {@link #advance}, on the calling thread, in due-time order (ties in scheduling order).
+ * <p>It drives a {@link MutableClock}, so while a task runs, {@code clock.instant()} equals that task's due time, just as it would in production if the timer fired exactly on time.
+ * <p>Single-threaded by design. It is a test double, not a concurrent scheduler.
  */
 public final class ManualScheduler implements Scheduler {
 
+    /**
+     * One waiting task: when it is due, its scheduling order (to break ties), and what to run.
+     */
     private record Task(Instant due, long seq, Runnable action) { }
 
     private final MutableClock clock;
@@ -22,10 +22,16 @@ public final class ManualScheduler implements Scheduler {
             new PriorityQueue<>(Comparator.comparing(Task::due).thenComparingLong(Task::seq));
     private long nextSeq;
 
+    /**
+     * Creates a scheduler that moves the given clock as virtual time passes.
+     */
     public ManualScheduler(MutableClock clock) {
         this.clock = clock;
     }
 
+    /**
+     * Queues the task to be due {@code delay} after the clock's current time. Nothing runs until {@link #advance}. Cancelling removes it from the queue.
+     */
     @Override
     public Cancellable schedule(Duration delay, Runnable action) {
         Task task = new Task(clock.instant().plus(delay), nextSeq++, action);
@@ -35,7 +41,7 @@ public final class ManualScheduler implements Scheduler {
 
     /**
      * Moves virtual time forward by {@code by}, running every task that falls due on the way.
-     * Tasks scheduled by a running task also run if they fall due inside the window.
+     * <p>Tasks scheduled by a running task also run if they fall due inside the window. Throws {@code IllegalArgumentException} for a negative duration, because virtual time only moves forward.
      */
     public void advance(Duration by) {
         if (by.isNegative()) {
@@ -52,6 +58,9 @@ public final class ManualScheduler implements Scheduler {
         clock.setInstant(target);
     }
 
+    /**
+     * Counts tasks still waiting to run.
+     */
     public int pending() {
         return queue.size();
     }

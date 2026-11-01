@@ -37,6 +37,21 @@
             <artifactId>rate-limiter</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>seat-hold-booking</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>notification-service</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.lld</groupId>
+            <artifactId>api-gateway-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

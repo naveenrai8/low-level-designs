@@ -1,10 +1,6 @@
 # Topic 07: Concurrency Primitives — Picking One, and Making Check-and-Act Atomic
 
-Most concurrency bugs in LLD rounds aren't exotic. They come from code that checks something
-("is the seat free?", "is the count under the limit?") and then acts on the answer, while another
-thread changes the answer in between. Swapping in a "thread-safe" collection doesn't fix it, and
-adding `volatile` doesn't either. The staff skill is to name the **invariant**, see the **gap**
-between check and act, and pick the **smallest primitive** that closes it.
+Most concurrency bugs in LLD rounds aren't exotic. They come from code that checks something ("is the seat free?", "is the count under the limit?") and then acts on the answer, while another thread changes the answer in between. Swapping in a "thread-safe" collection doesn't fix it, and adding `volatile` doesn't either. The staff skill is to name the **invariant**, see the **gap** between check and act, and pick the **smallest primitive** that closes it.
 
 ## Table of Contents
 
@@ -18,8 +14,7 @@ between check and act, and pick the **smallest primitive** that closes it.
 
 ## 1. The Problem
 
-Three bugs that show up again and again in LLD code. All three are in this module, each with a
-test that reproduces the bug:
+Three bugs that show up again and again in LLD code. All three are in this module, each with a test that reproduces the bug:
 
 | Bug | Looks safe because… | What actually happens |
 |---|---|---|
@@ -27,8 +22,29 @@ test that reproduces the bug:
 | **`volatile long count; count++`** | "volatile makes it thread-safe" | `++` is read-add-write. Two threads read 41 and both write 42, so hits are lost |
 | **`ConcurrentHashMap<K, ArrayList<V>>`** + `computeIfAbsent(k, …).add(v)` | "computeIfAbsent is atomic" | The `add` runs *after* the map lock is released. Items get lost and the list is left with **`null` slots** (seen here as an NPE on read) |
 
-The common root: **a thread-safe component makes each call atomic, never a sequence of calls.**
-An invariant that spans two calls (check + act, or map + value) needs one primitive covering both.
+Worked example for the first bug. Ann and Bob both ask for seat 7 at the same time:
+
+| Step | Ann's thread | Bob's thread | Map after |
+|---|---|---|---|
+| 1 | `containsKey(7)` → false (free) | | empty |
+| 2 | | `containsKey(7)` → false (free) | empty |
+| 3 | `put(7, "Ann")`, returns true | | 7 → Ann |
+| 4 | | `put(7, "Bob")`, returns true | 7 → Bob |
+
+Both were told "booked", but only Bob holds the seat. Ann's check was true when she made it and false by the time she acted.
+
+Worked example for the counter bug. The count is 41 and two threads each hit once:
+
+| Step | Thread A | Thread B | Count in memory |
+|---|---|---|---|
+| 1 | reads 41 | | 41 |
+| 2 | | reads 41 | 41 |
+| 3 | writes 42 | | 42 |
+| 4 | | writes 42 | 42 |
+
+Two hits happened but the count only moved by one.
+
+The common root: **a thread-safe component makes each call atomic, never a sequence of calls.** An invariant that spans two calls (check + act, or map + value) needs one primitive covering both.
 
 ---
 
@@ -36,8 +52,7 @@ An invariant that spans two calls (check + act, or map + value) needs one primit
 
 ### Step 1: name the shared state and the invariant out loud
 
-> "The shared state is `seat → holder`. The invariant is *at most one holder per seat, and
-> whoever we tell 'you won' is the holder*. The check and the act must be one atomic step."
+> "The shared state is `seat → holder`. The invariant is *at most one holder per seat, and whoever we tell 'you won' is the holder*. The check and the act must be one atomic step."
 
 Once it's stated like that, the primitive almost picks itself.
 
@@ -79,16 +94,9 @@ index.computeIfAbsent(tag, t -> ConcurrentHashMap.newKeySet()).add(item);
 
 ### Step 4: tests that catch the bug, not tests that hope to
 
-A race test that "usually passes" proves nothing. Measured: the broken seat map *without* the
-hook, raced by 2 threads on 1 seat, double-booked in only **2 of 20** runs, so that test is
-green 90% of the time against broken code. At 32 threads × 1,000 seats it failed 20 of 20. There
-are two techniques, and this module uses both:
+A race test that "usually passes" proves nothing. Measured: the broken seat map *without* the hook, raced by 2 threads on 1 seat, double-booked in only **2 of 20** runs, so that test is green 90% of the time against broken code. At 32 threads × 1,000 seats it failed 20 of 20. There are two techniques, and this module uses both:
 
-1. **Force the interleaving (deterministic).** The broken seat map takes a `RaceWindow` hook
-   between its check and its act. The test passes a `CyclicBarrier(2)`, so the barrier opens only
-   once **both** threads have checked. Both are then guaranteed to act on a stale "free". The bug
-   reproduces on every run, with no sleeps and no luck. The fixed class has no gap, so it takes no
-   hook.
+1. **Force the interleaving (deterministic).** The broken seat map takes a `RaceWindow` hook between its check and its act. The test passes a `CyclicBarrier(2)`, so the barrier opens only once **both** threads have checked. Both are then guaranteed to act on a stale "free". The bug reproduces on every run, with no sleeps and no luck. The fixed class has no gap, so it takes no hook.
 
    ```
    T1: containsKey(7)=false ──┐                 ┌── put(7,"user-0") → true
@@ -96,14 +104,9 @@ are two techniques, and this module uses both:
    T2: containsKey(7)=false ──┘                 └── put(7,"user-1") → true   ← double booking
    ```
 
-2. **Hammer with a start gate (probabilistic, bounded retries).** When the race is inside the JDK
-   (`count++`, `ArrayList.add`) there's nowhere to put a hook. The test runs 8 threads × 100k ops
-   behind a `CountDownLatch` start gate and retries up to 10 times. The *fix* test asserts the
-   exact count.
+2. **Hammer with a start gate (probabilistic, bounded retries).** When the race is inside the JDK (`count++`, `ArrayList.add`) there's nowhere to put a hook. The test runs 8 threads × 100k ops behind a `CountDownLatch` start gate and retries up to 10 times. The *fix* test asserts the exact count.
 
-Production-grade alternatives for (2): [jcstress](https://github.com/openjdk/jcstress) for JMM
-litmus tests, and [Lincheck](https://github.com/JetBrains/lincheck) for linearizability checking.
-Both are too heavy for a 45-minute round. Name them, don't use them.
+Production-grade alternatives for (2): [jcstress](https://github.com/openjdk/jcstress) for JMM litmus tests, and [Lincheck](https://github.com/JetBrains/lincheck) for linearizability checking. Both are too heavy for a 45-minute round. Name them, don't use them.
 
 Run it: [`commands.md`](commands.md).
 
@@ -113,25 +116,12 @@ Run it: [`commands.md`](commands.md).
 
 ### Misconceptions
 
-- **"ConcurrentHashMap makes my code thread-safe."** It makes *each map operation* atomic. Your
-  invariant is almost always about a *sequence*. Use the atomic compound methods (`compute`,
-  `merge`, `putIfAbsent`, `computeIfAbsent`) or a lock.
-- **"`volatile` fixes races."** It fixes *visibility* (a write is seen by later reads) and
-  ordering. It never makes read-modify-write atomic. Reach for it for a `stop` flag or a
-  safely published immutable reference, and for nothing else.
-- **"`computeIfAbsent(...).add(...)` is atomic."** Only the `computeIfAbsent` part is. The
-  returned value is mutated outside any lock.
-- **"`synchronized` is slow, so I'll use lock-free."** Uncontended `synchronized` is cheap.
-  A CAS loop on a hot variable can be *worse* than a lock under heavy contention, because every
-  failed CAS is wasted work. Start with the simplest correct thing and measure. `LongAdder`
-  exists precisely because `AtomicLong` degrades under write contention.
-- **"Lambdas inside `compute` can do anything."** Keep them short, and **never** touch another
-  key of the same map inside one. The Javadoc warns that this can deadlock or throw
-  `IllegalStateException("Recursive update")`.
-- **"CopyOnWriteArrayList is the safe list."** It's safe and O(n) per write. It's right for a
-  listener list (tiny, written rarely, iterated constantly) and wrong for an index, a queue, or
-  anything that grows. It also doesn't fix check-then-act: `if (!contains) add` still races. Use
-  `addIfAbsent` ([Topic 12](../12-common-mistakes/)).
+- **"ConcurrentHashMap makes my code thread-safe."** It makes *each map operation* atomic. Your invariant is almost always about a *sequence*. Use the atomic compound methods (`compute`, `merge`, `putIfAbsent`, `computeIfAbsent`) or a lock.
+- **"`volatile` fixes races."** It fixes *visibility* (a write is seen by later reads) and ordering. It never makes read-modify-write atomic. Reach for it for a `stop` flag or a safely published immutable reference, and for nothing else.
+- **"`computeIfAbsent(...).add(...)` is atomic."** Only the `computeIfAbsent` part is. The returned value is mutated outside any lock.
+- **"`synchronized` is slow, so I'll use lock-free."** Uncontended `synchronized` is cheap. A CAS loop on a hot variable can be *worse* than a lock under heavy contention, because every failed CAS is wasted work. Start with the simplest correct thing and measure. `LongAdder` exists precisely because `AtomicLong` degrades under write contention.
+- **"Lambdas inside `compute` can do anything."** Keep them short, and **never** touch another key of the same map inside one. The Javadoc warns that this can deadlock or throw `IllegalStateException("Recursive update")`.
+- **"CopyOnWriteArrayList is the safe list."** It's safe and O(n) per write. It's right for a listener list (tiny, written rarely, iterated constantly) and wrong for an index, a queue, or anything that grows. It also doesn't fix check-then-act: `if (!contains) add` still races. Use `addIfAbsent` ([Topic 12](../12-common-mistakes/)).
 
 ### Failure modes and their symptoms
 
@@ -145,59 +135,42 @@ Run it: [`commands.md`](commands.md).
 
 ### When NOT to reach for a concurrency primitive
 
-- **When you can confine state to one thread** (actor/event-loop style, a single-writer queue).
-  No shared mutable state means no races. This is often the cleanest answer for an
-  order-matching engine.
-- **When the data can be immutable.** Publish a new immutable snapshot through one `volatile`
-  or `AtomicReference` write (config reload, routing tables).
-- **When the interviewer said single-threaded.** Say "I'll keep it single-threaded as agreed, and
-  here's the one place I'd add a lock if that changes." Don't sprinkle `synchronized` everywhere.
+- **When you can confine state to one thread** (actor/event-loop style, a single-writer queue). No shared mutable state means no races. This is often the cleanest answer for an order-matching engine.
+- **When the data can be immutable.** Publish a new immutable snapshot through one `volatile` or `AtomicReference` write (config reload, routing tables).
+- **When the interviewer said single-threaded.** Say "I'll keep it single-threaded as agreed, and here's the one place I'd add a lock if that changes." Don't sprinkle `synchronized` everywhere.
 
 ### Interview move
 
-When you write any `if (…) { mutate }` on shared state, pause and say: *"This is a check-then-act.
-Here's the invariant, and here's how I make it atomic."* That single sentence is the strongest
-concurrency signal available in a 45-minute round.
+When you write any `if (…) { mutate }` on shared state, pause and say: *"This is a check-then-act. Here's the invariant, and here's how I make it atomic."* That single sentence is the strongest concurrency signal available in a 45-minute round.
 
 ---
 
 ## 4. Official References
 
-- `java.util.concurrent` package summary (memory consistency effects and the happens-before table):
-  https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/package-summary.html
-- `ConcurrentHashMap` (atomicity of `compute`/`merge`/`putIfAbsent`, and the no-other-keys rule):
-  https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html
-- `LongAdder` (when to prefer it over `AtomicLong`):
-  https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/atomic/LongAdder.html
+- `java.util.concurrent` package summary (memory consistency effects and the happens-before table): https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/package-summary.html
+- `ConcurrentHashMap` (atomicity of `compute`/`merge`/`putIfAbsent`, and the no-other-keys rule): https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html
+- `LongAdder` (when to prefer it over `AtomicLong`): https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/atomic/LongAdder.html
 - `CopyOnWriteArrayList`: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CopyOnWriteArrayList.html
-- JLS §17.4, the Java Memory Model (what `volatile` does and doesn't guarantee):
-  https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.4
+- JLS §17.4, the Java Memory Model (what `volatile` does and doesn't guarantee): https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.4
 - Aleksey Shipilëv, *Java Memory Model Pragmatics*: https://shipilev.net/blog/2014/jmm-pragmatics/
 - jcstress (OpenJDK concurrency stress tests): https://github.com/openjdk/jcstress
-- Brian Goetz et al., *Java Concurrency in Practice* (book), ch. 2 (atomicity and compound actions)
-  and ch. 5 (concurrent collections).
+- Brian Goetz et al., *Java Concurrency in Practice* (book), ch. 2 (atomicity and compound actions) and ch. 5 (concurrent collections).
 
 ---
 
 ## 5. Key Takeaways
 
 1. A thread-safe collection makes **calls** atomic, not **sequences** of calls.
-2. Say the invariant, find the gap between check and act, then close it with *one* atomic
-   operation (`putIfAbsent`, `compute`, `merge`, CAS) or one lock.
+2. Say the invariant, find the gap between check and act, then close it with *one* atomic operation (`putIfAbsent`, `compute`, `merge`, CAS) or one lock.
 3. `volatile` = visibility only. `++` on a volatile still loses updates.
-4. A concurrent map of non-concurrent values is a race. Make the value concurrent, or do the
-   whole update inside `compute`.
+4. A concurrent map of non-concurrent values is a race. Make the value concurrent, or do the whole update inside `compute`.
 5. `LongAdder` for hot counters, `AtomicLong` when you need CAS or the new value.
 6. COW lists are for tiny, rarely written lists (listeners). Writes are O(n).
-7. Test races deterministically: force the interleaving with a barrier at a seam. Where you
-   can't, hammer behind a start gate and assert exact totals for the fix.
+7. Test races deterministically: force the interleaving with a barrier at a seam. Where you can't, hammer behind a start gate and assert exact totals for the fix.
 8. Confinement and immutability beat clever locking when the problem allows them.
 
 ---
 
-**Self-grade: STRONG.** Three real bug classes with a reproducing test each (one deterministic,
-two bounded-probabilistic), a primitive-selection table with "not" alternatives, symptoms, and
-when-not-to. One gap: `StampedLock` and `ReadWriteLock` are only covered by pointers to
-Topic 12, not coded here.
+**Self-grade: STRONG.** Three real bug classes with a reproducing test each (one deterministic, two bounded-probabilistic), a primitive-selection table with "not" alternatives, symptoms, and when-not-to. One gap: `StampedLock` and `ReadWriteLock` are only covered by pointers to Topic 12, not coded here.
 
 [← Topic 06: State Machines](../06-state-machines/) · [Index](../README.md) · [Topic 08: Multi-Object Atomicity →](../08-multi-object-atomicity/)

@@ -14,6 +14,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Proves the virtual-time scheduler behaves like a real one (order, due times, cancel), plus one smoke test of the real executor scheduler.
+ */
 class SchedulerTest {
 
     private static final Instant T0 = Instant.parse("2026-03-08T09:00:00Z");
@@ -21,6 +24,9 @@ class SchedulerTest {
     private final MutableClock clock = new MutableClock(T0);
     private final ManualScheduler scheduler = new ManualScheduler(clock);
 
+    /**
+     * Proves tasks run earliest first, tied tasks run in the order they were scheduled, and a task due exactly at the end of the window still runs.
+     */
     @Test
     void manualSchedulerRunsTasksInDueOrderWithTiesInSchedulingOrder() {
         List<String> ran = new ArrayList<>();
@@ -34,6 +40,9 @@ class SchedulerTest {
         assertEquals(List.of("a@1", "b@1", "c@3"), ran);
     }
 
+    /**
+     * Proves the clock reads each task's own due time while it runs, and ends at the end of the window.
+     */
     @Test
     void manualSchedulerShowsEachTaskItsOwnDueTime() {
         List<Instant> seen = new ArrayList<>();
@@ -45,6 +54,9 @@ class SchedulerTest {
         assertEquals(T0.plusSeconds(60), clock.instant());
     }
 
+    /**
+     * Proves a task that reschedules itself every 10 seconds runs three times in a 35-second window, with the next run still pending.
+     */
     @Test
     void manualSchedulerRunsTasksScheduledByTasksInsideTheWindow() {
         List<Instant> seen = new ArrayList<>();
@@ -60,6 +72,9 @@ class SchedulerTest {
         assertEquals(1, scheduler.pending());
     }
 
+    /**
+     * Proves a cancelled task never runs, and that cancelling a second time returns false.
+     */
     @Test
     void manualSchedulerCancelPreventsTheRun() {
         boolean[] ran = {false};
@@ -70,6 +85,9 @@ class SchedulerTest {
         assertFalse(handle.cancel(), "nothing left to cancel");
     }
 
+    /**
+     * Proves the production scheduler runs a task on a real thread and can cancel a far-future one. This is the only test that uses real time.
+     */
     @Test
     void executorSchedulerRunsForRealAndCanCancel() throws InterruptedException {
         ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();

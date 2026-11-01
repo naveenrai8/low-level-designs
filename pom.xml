@@ -22,8 +22,48 @@
         <module>08-multi-object-atomicity</module>
         <module>10-time-and-testability</module>
         <module>12-common-mistakes</module>
+        <!-- Phase 2: classic LLD -->
+        <module>14-parking-lot</module>
+        <module>15-vending-machine</module>
+        <module>16-elevator</module>
+        <module>17-lru-lfu-cache</module>
+        <module>18-logging-framework</module>
+        <module>19-turn-based-game-engine</module>
+        <module>20-library-management</module>
         <!-- Phase 3: concurrency-heavy components -->
         <module>21-rate-limiter</module>
+        <module>22-blocking-queue-thread-pool</module>
+        <module>23-delayed-job-scheduler</module>
+        <module>24-kv-store-ttl-transactions</module>
+        <module>25-pub-sub</module>
+        <module>26-connection-pool</module>
+        <module>27-circuit-breaker-and-retry</module>
+        <module>28-id-generator</module>
+        <module>29-consistent-hashing</module>
+        <module>30-sliding-window-metrics</module>
+        <!-- Phase 4: transactional domain problems -->
+        <module>31-seat-hold-booking</module>
+        <module>32-double-entry-ledger</module>
+        <module>33-splitwise</module>
+        <module>34-auction</module>
+        <module>35-order-matching-engine</module>
+        <module>36-ride-delivery-dispatch</module>
+
+        <!-- Phase 5: design + algorithm hybrids -->
+        <module>37-spreadsheet</module>
+        <module>38-in-memory-file-system</module>
+        <module>39-undo-redo-editor</module>
+        <module>40-autocomplete-top-k</module>
+        <module>41-leaderboard</module>
+        <module>42-workflow-engine</module>
+        <module>43-feature-flags</module>
+        <module>44-notification-service</module>
+        <module>45-content-popularity</module>
+        <!-- Phase 6: capstones (glue over earlier modules) -->
+        <module>46-capstone-api-gateway-core</module>
+        <module>47-capstone-ticketing-platform</module>
+        <module>48-capstone-jira-lite</module>
+
         <!-- The single Spring Boot app (adapters over core modules) -->
         <module>app</module>
     </modules>

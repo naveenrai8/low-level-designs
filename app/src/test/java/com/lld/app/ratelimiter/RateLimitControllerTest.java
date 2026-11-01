@@ -18,17 +18,16 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 
-/**
- * Full context, real limiter (5/s token bucket from application.yml), real HTTP mapping. Time is
- * frozen: with the system clock a token refills every 200ms, so a slow CI box would flake.
- */
+/** Full Spring context, the real limiter (5 per second token bucket from application.yml) and the real HTTP mapping. Time is frozen, because with the real clock a token refills every 200 ms and a slow CI machine would make the test flaky. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(RateLimitControllerTest.FrozenTime.class)
 class RateLimitControllerTest {
 
+    /** Replaces the real clock with one that never moves. */
     @TestConfiguration(proxyBeanMethods = false)
     static class FrozenTime {
+        /** Returns a ticker stuck at 0, so no tokens refill during the test. */
         @Bean
         @Primary
         Ticker frozenTicker() {
@@ -39,6 +38,7 @@ class RateLimitControllerTest {
     @Autowired
     MockMvc mvc;
 
+    /** Proves 5 requests get 200 with a falling remaining count, then the 6th gets 429 with {@code Retry-After: 1}. */
     @Test
     void grantsTheLimitThenReturns429WithRetryAfterInWholeSeconds() throws Exception {
         for (int i = 4; i >= 0; i--) {
@@ -53,6 +53,7 @@ class RateLimitControllerTest {
                 .andExpect(jsonPath("$.allowed").value(false));
     }
 
+    /** Proves using up one key over HTTP does not block a different key. */
     @Test
     void keysAreIndependent() throws Exception {
         for (int i = 0; i < 5; i++) {
@@ -61,6 +62,7 @@ class RateLimitControllerTest {
         mvc.perform(post("/api/rate-limit/dave")).andExpect(status().isOk());
     }
 
+    /** Proves asking for more permits than the limit gets 400 (fix your request), not 429 (try later). */
     @Test
     void aRequestThatCanNeverSucceedIsA400NotA429() throws Exception {
         mvc.perform(post("/api/rate-limit/erin").param("permits", "99"))
@@ -68,6 +70,7 @@ class RateLimitControllerTest {
                 .andExpect(jsonPath("$.detail").exists());
     }
 
+    /** Proves {@code Retry-After} seconds are rounded up, never down. */
     @Test
     void retryAfterRoundsUp() {
         assertEquals(1, RateLimitController.retryAfterSeconds(Duration.ofMillis(1)));

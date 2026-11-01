@@ -1,12 +1,8 @@
 # Topic 03: Domain Modeling
 
-Most LLD rounds are lost in minute 8, not minute 40. The candidate draws twelve classes, one per
-noun in the prompt (`ParkingLot`, `Floor`, `Spot`, `Vehicle`, `Car`, `Bike`, `Ticket`, `Payment`,
-`Gate`…). They're all mutable bags of getters and setters, and none of them can say what must
-always be true. Then the follow-up ("now support EV charging spots") forces a rewrite, and the
-concurrency question has no answer because nobody knows which object owns which fact. A staff
-model is smaller. It separates *things with identity* from *values*, puts every invariant in a
-constructor or a single owning method, and makes illegal states unrepresentable.
+Most LLD rounds are lost at minute 8, not minute 40. The candidate draws twelve classes, one for each noun in the prompt (`ParkingLot`, `Floor`, `Spot`, `Vehicle`, `Car`, `Bike`, `Ticket`, `Payment`, `Gate`…). Each is a bag of getters and setters, and none can say what must always be true. Then the follow-up ("now support EV charging spots") forces a rewrite. The thread-safety question also has no answer, because nobody knows which object owns which fact. A staff model is smaller. It separates *things with an identity* from *plain values*. It puts every rule in a constructor or in one owning method. And it makes wrong states impossible to build: if two fields can never both be true, the code has no way to set them that way.
+
+**Words used here.** An *entity* is a thing with its own identity, like one specific ticket. A *value object* is a thing defined only by its fields, like `Money(500, INR)`. An *invariant* is a rule that must always be true, such as "a spot is never free and occupied at once". A *record* is a Java class for data that never changes. *Immutable* means it cannot change after it is built.
 
 ## Table of Contents
 
@@ -24,19 +20,17 @@ constructor or a single owning method, and makes illegal states unrepresentable.
 
 | Symptom | Root cause | When it bites |
 |---|---|---|
-| `spot.setVehicle(v)` called from three places; one forgets to update `freeCount` | No single owner of an invariant | First concurrency question |
-| `ticket.getEntries().add(...)` from outside corrupts state | Internal mutable collection leaked | The old `review-*_old.md` files flagged this repeatedly |
-| `Money` as `double`; `0.1 + 0.2 != 0.3` | Value not modeled as a value | Any billing follow-up (Topic 11) |
-| `if (vehicle instanceof Car) … else if (… Bike)` scattered everywhere | Closed hierarchy not declared closed | "Add a truck" follow-up: 6 files change, one is missed |
-| `Spot` has `isFree`, `vehicle`, `reservedBy`, `outOfService` booleans | Illegal combinations representable (`isFree && vehicle != null`) | Every bug report |
+| `spot.setVehicle(v)` is called from three places; one forgets `freeCount` | No single owner of a rule | The first thread-safety question |
+| `ticket.getEntries().add(...)` from outside corrupts the ticket | The inner list was handed out | The old `review-*_old.md` files flagged this again and again |
+| `Money` stored as `double`; `0.1 + 0.2 != 0.3` | Money is not modeled as its own value | Any billing follow-up (Topic 11) |
+| `if (vehicle instanceof Car) … else if (… Bike)` repeated everywhere | A fixed set of types is not declared fixed | "Add a truck": 6 files change and one is missed |
+| `Spot` has `isFree`, `vehicle`, `reservedBy`, `outOfService` | Wrong combinations can be set (`isFree && vehicle != null`) | Every bug report |
 
 ### What the interviewer is probing
 
-- Can you find the **2–4 types that carry the invariants**, and push everything else to values or enums?
-- Do you know which objects have **identity** (a spot, a ticket) and which are **values** (a
-  license plate, money, a time range)?
-- Is the model **closed where the domain is closed** (vehicle sizes) and **open where it will
-  grow** (pricing rules)?
+- Can you find the **2 to 4 types that carry the rules**, and make everything else a value or an enum?
+- Do you know which objects have an **identity** (a spot, a ticket) and which are **values** (a license plate, money, a time range)?
+- Is the model **fixed where the domain is fixed** (vehicle sizes) and **open where it will grow** (pricing rules)?
 
 ---
 
@@ -47,14 +41,13 @@ constructor or a single owning method, and makes illegal states unrepresentable.
 | | Entity | Value object |
 |---|---|---|
 | Equality | By identity (ID) | By all fields |
-| Mutability | May change over time (state transitions) | Immutable |
-| Java 21 shape | `final class` with an ID, `equals`/`hashCode` on ID only | `record` |
+| Mutability | Can change over time (for example free to occupied) | Never changes |
+| Java 21 shape | `final class` with an ID; `equals` and `hashCode` use the ID only | `record` |
 | Examples | `Spot`, `Ticket`, `Account`, `Order` | `LicensePlate`, `Money`, `SpotId`, `TimeRange` |
 
-Rule of thumb: **if two instances with the same fields are interchangeable, it's a value.** Two
-`Money(500, INR)` are the same thing. Two tickets for the same plate at the same time aren't.
+Rule of thumb: **if two objects with the same fields are interchangeable, it is a value.** Two `Money(500, INR)` are the same thing. Two tickets for the same plate at the same time are not.
 
-### Invariants live in constructors (compact record constructors)
+### Rules live in constructors (compact record constructors)
 
 ```java
 public record Money(long minorUnits, Currency currency) {
@@ -78,12 +71,9 @@ public record TimeRange(Instant start, Instant end) {
 }
 ```
 
-Once constructed, a `TimeRange` can never be inverted, so no method downstream has to check.
-That's the payoff: **validate once at the boundary, then trust the type.** `../21-rate-limiter`
-does the same with `RateLimit` (`permits ≥ 1`, `window ≥ permits ns`) and `Decision` (an allowed
-decision has zero `retryAfter`).
+Once built, a `TimeRange` can never have its end before its start, so no later method has to check. That is the payoff: **check once when the object is built, then trust the type.** `../21-rate-limiter` does the same with `RateLimit` (`permits ≥ 1`, `window ≥ permits ns`) and `Decision` (an allowed decision has zero `retryAfter`).
 
-### Closed hierarchies: sealed interfaces + pattern-matching `switch`
+### Fixed sets of types: sealed interfaces and `switch`
 
 ```java
 public sealed interface Vehicle permits Car, Motorcycle, Truck {
@@ -102,9 +92,7 @@ static SpotSize requiredSize(Vehicle v) {
 }
 ```
 
-Add `Bus` to `permits` and **every switch without a `default` fails to compile**. The
-"add a new type" follow-up becomes a compiler-guided edit instead of a grep. Don't add `default`
-to these switches, because it switches the check off.
+*Sealed* means only the listed types may implement the interface. Add `Bus` to `permits` and **every switch without a `default` stops compiling**. The compiler then lists every place to fix, so you do not have to search by hand. Do not add `default` to these switches, because it turns that check off.
 
 ### Enums with behaviour
 
@@ -115,10 +103,9 @@ public enum SpotSize {
 }
 ```
 
-Use an enum when the set is fixed and small and each member needs data or behaviour. Use a sealed
-interface when members carry *different* fields (`Truck.axles`).
+Use an enum when the set is small and fixed and each member needs some data or behaviour. Use a sealed interface when members carry *different* fields (`Truck.axles`).
 
-### Immutability and defensive copies
+### Immutability and copying
 
 ```java
 public final class Ticket {
@@ -133,14 +120,13 @@ public final class Ticket {
 }
 ```
 
-`List.copyOf` returns an **unmodifiable copy** (and rejects `null` elements).
-`Collections.unmodifiableList(x)` is only a **view**: if you keep `x` and mutate it, readers see the
-change. If the entity must mutate its own list, keep an `ArrayList` privately and return
-`List.copyOf(list)`, or expose a query method (`totalCharged()`) instead of the collection.
+Example: `var items = new ArrayList<>(List.of(a)); var order = new Order(items); items.add(b);` If `Order` stored `items` directly, the order now has two items without anyone calling the order. With `List.copyOf` it still has one.
+
+`List.copyOf` returns an **unmodifiable copy** (and rejects `null` elements). `Collections.unmodifiableList(x)` is only a **view**: if you keep `x` and mutate it, readers see the change. If the entity must mutate its own list, keep an `ArrayList` privately and return `List.copyOf(list)`, or expose a query method (`totalCharged()`) instead of the collection.
 
 ### Worked example: parking lot, mid-level vs staff model
 
-**Mid-level (noun extraction):**
+**Mid-level (one class per noun):**
 
 ```
 ParkingLot ── Floor* ── Spot* (isFree, vehicle, type, setters)
@@ -149,8 +135,7 @@ Ticket (entryTime, exitTime, spot, vehicle, amount, setters)
 Payment, Gate, EntryGate, ExitGate, DisplayBoard, Admin, Attendant …
 ```
 
-Free-count lives in `Floor`, occupancy in `Spot`, and the ticket points at a mutable spot. Three
-objects must change together, and nothing owns that.
+The free count lives in `Floor`, occupancy lives in `Spot`, and the ticket points at a spot that can change. Three objects must change together, and nothing owns that.
 
 **Staff:**
 
@@ -168,12 +153,9 @@ record Free() implements SpotState {}
 record Occupied(TicketId ticket) implements SpotState {}
 ```
 
-- `isFree && vehicle != null` **can't be expressed**: the state is one or the other.
-- `ParkingLot.park(vehicle)` is the only path that changes occupancy and the free index together,
-  so the concurrency answer is one lock (or per-size locks) on `ParkingLot`, not on 500 spots.
-  See Topic 08.
-- Gates, display boards, admins and attendants are **out of scope** until asked. Name them,
-  don't draw them.
+- `isFree && vehicle != null` **cannot happen**: the state is `Free` or `Occupied`, never both.
+- `ParkingLot.park(vehicle)` is the only way to change occupancy and the free index together. So the thread-safety answer is one lock (or one per size) on `ParkingLot`, not 500 locks on spots. See Topic 08.
+- Gates, display boards, admins and attendants are **out of scope** until asked. Name them but do not draw them.
 
 ---
 
@@ -183,42 +165,31 @@ record Occupied(TicketId ticket) implements SpotState {}
 
 | Mistake | Why it's wrong | Fix |
 |---|---|---|
-| One class per noun | Scatters invariants; burns 10 minutes drawing | Find the owner of each invariant; nouns without behaviour become values, enums, or nothing |
-| Getters **and setters** on everything | Any caller can break any invariant | Intention-revealing methods (`park`, `release`) on the owner; no setters |
-| `equals` on all fields of an entity | Two snapshots of one ticket are "different"; `HashSet` loses it after mutation | Entity equality = ID only; **mutable fields must never be in `hashCode`** |
-| Record holding a mutable `List` | Records are shallowly immutable: `record Order(List<Item> items)` still leaks | `items = List.copyOf(items)` in the compact constructor |
-| Abstract class hierarchy for vehicle types with `getType()` + `instanceof` chains | Open hierarchy, and the switch can't be exhaustive | Sealed interface + records |
-| Booleans for state (`isActive`, `isCancelled`, `isPaid`) | 2ⁿ combinations, most illegal | An enum or sealed state (Topic 06) |
-| `double` for money, `long` millis for "dates" | Rounding; time zones lost | `long` minor units (Topic 11); `Instant` / `LocalDate` |
-| Modeling persistence (IDs as `Long` from a DB, JPA annotations) | Irrelevant in a 45-min core | Typed IDs (`record SpotId(String value)`) |
+| One class per noun | Spreads the rules around and burns 10 minutes drawing | Find who owns each rule; nouns with no behaviour become values, enums, or nothing |
+| Getters **and setters** on everything | Any caller can break any rule | Methods named for the action (`park`, `release`) on the owner; no setters |
+| `equals` on all fields of an entity | Two copies of one ticket look "different"; a `HashSet` loses it after a change | Compare entities by ID only; **never put changing fields in `hashCode`** |
+| Record holding a changeable `List` | A record only locks its own fields: `record Order(List<Item> items)` still leaks | `items = List.copyOf(items)` in the compact constructor |
+| Abstract class tree for vehicles with `getType()` and `instanceof` chains | Anyone can add a type, and the switch cannot check it covers them all | Sealed interface and records |
+| Booleans for state (`isActive`, `isCancelled`, `isPaid`) | 3 booleans give 8 combinations and most make no sense | One enum or sealed state (Topic 06) |
+| `double` for money, `long` millis for "dates" | Rounding errors; time zones lost | `long` minor units (Topic 11); `Instant` or `LocalDate` |
+| Modeling the database (`Long` IDs, JPA annotations) | Does not matter in a 45-minute round | Typed IDs (`record SpotId(String value)`) |
 
 ### "I thought X, but actually Y"
 
-- **"Records are immutable."** They're *shallowly* immutable. Final fields, but the referenced
-  objects can still mutate.
-- **"Unmodifiable = immutable."** `Collections.unmodifiableList` is a read-only *view* over a
-  list someone else may still be mutating.
-- **"Sealed means final."** Permitted subclasses may themselves be `non-sealed`, which reopens
-  the hierarchy below them.
-- **"Enum ordinal order is a fine encoding."** Only if you write it down. Reordering the
-  constants silently changes `compareTo`. For anything persisted or sent over the wire, use an
-  explicit field.
+- **"Records are immutable."** Only one level deep. The fields are final, but a list inside a record can still change.
+- **"Unmodifiable = immutable."** `Collections.unmodifiableList` is a read-only *view*. Someone else may still be changing the list underneath.
+- **"Sealed means final."** A permitted subclass can be marked `non-sealed`, which lets anyone extend it again.
+- **"Enum order is a fine encoding."** Only if you write it down. Reordering the constants silently changes `compareTo`. For anything saved or sent over the network, use an explicit field.
 
 ### When NOT to
 
-- **Don't make a value object for every primitive.** `SpotId` earns its place (it prevents
-  mixing it up with `TicketId`). `FloorNumber(int)` usually doesn't.
-- **Don't seal what the follow-up will extend from outside.** Pricing rules, notification
-  channels and plugins are open by nature, so use an interface (Strategy, Topic 05).
-- **Don't model the org chart.** `Admin`, `Attendant` and `Customer` classes with no behaviour
-  are drawing, not design.
+- **Don't wrap every primitive in a value type.** `SpotId` earns its place, because it stops you mixing it up with `TicketId`. `FloorNumber(int)` usually does not.
+- **Don't seal what a follow-up will extend from outside.** Pricing rules, notification channels and plugins are open by nature, so use a plain interface (Strategy, Topic 05).
+- **Don't model the org chart.** `Admin`, `Attendant` and `Customer` classes with no behaviour are drawing, not design.
 
 ### Interview move
 
-At minute ~5, say: *"Let me separate values from entities and find who owns each invariant.
-`ParkingLot` owns occupancy. `Ticket` is immutable once issued. Vehicle types are a closed set,
-so I'll seal them. Pricing is the open part, so it's an interface."* That one sentence covers
-modeling, concurrency ownership and the extension point before you've written a class.
+At about minute 5, say: *"Let me separate values from entities and find who owns each rule. `ParkingLot` owns occupancy. `Ticket` never changes once issued. Vehicle types are a fixed set, so I'll seal them. Pricing is the open part, so it's an interface."* That one sentence covers the model, who owns thread safety, and the extension point before you have written a class.
 
 ---
 
@@ -237,20 +208,16 @@ modeling, concurrency ownership and the extension point before you've written a 
 
 ## 5. Key Takeaways
 
-1. Model the **owners of invariants** first. Most nouns become values, enums, or nothing.
+1. Find the **owner of each rule** first. Most nouns become values, enums, or nothing.
 2. **Entity** = identity, equality on ID. **Value** = all fields, immutable, a `record`.
-3. Validate in the **compact constructor**, then trust the type everywhere downstream.
-4. Closed sets → **sealed interface + exhaustive `switch`** without `default`. The compiler then
-   finds every place a new type must be handled.
-5. Records are **shallowly** immutable: `List.copyOf` incoming collections.
-6. Represent state as **one enum or sealed type**, never a set of booleans.
-7. Mark the **open extension point** (usually a policy interface) explicitly. Leave everything
-   else closed.
+3. Check in the **compact constructor**, then trust the type everywhere after.
+4. For a fixed set, use a **sealed interface and a `switch` with no `default`**. The compiler then finds every place a new type must be handled.
+5. Records lock only one level: use `List.copyOf` on incoming lists.
+6. Show state as **one enum or sealed type**, never a pile of booleans.
+7. Mark the **one open extension point** (usually a policy interface) clearly. Keep everything else closed.
 
 ---
 
 [← Topic 02: Staff Signals and Rubric](../02-staff-signals-and-rubric/) · [Index](../README.md) · [Topic 04: Interface-First API and Errors →](../04-interface-first-api-and-errors/)
 
-**Self-grade: ADEQUATE.** The full spine is there, with a worked mid-vs-staff contrast, a gaps
-table, when-not-to and an interview move. But it's docs-only with no runnable module proving the
-mutability-leak and `hashCode` failures, and modeling has few hard numbers by nature.
+**Self-grade: ADEQUATE.** The full spine is there, with a worked mid-vs-staff contrast, a gaps table, when-not-to and an interview move. But it's docs-only with no runnable module proving the mutability-leak and `hashCode` failures, and modeling has few hard numbers by nature.

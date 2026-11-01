@@ -4,14 +4,19 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * "At most {@code permits} per {@code window}" — the policy, separate from the algorithm that
- * enforces it.
+ * The rule being enforced: "at most {@code permits} requests per {@code window}", for example 5 per second. It says nothing about which algorithm enforces it.
  *
- * <p>For the token bucket, {@code permits} is also the bucket capacity (the maximum burst) and the
- * refill rate is {@code permits / window}.
+ * <p>A <em>window</em> is the length of time the limit is counted over (1 second, 1 minute).
+ *
+ * <p>For the token bucket, {@code permits} is also the bucket size (the biggest burst allowed at once), and the bucket refills at {@code permits / window}.
  */
 public record RateLimit(long permits, Duration window) {
 
+    /**
+     * Rejects limits that make no sense: zero or negative permits, a zero or negative window, or more than one permit per nanosecond.
+     *
+     * @throws IllegalArgumentException if the limit is invalid
+     */
     public RateLimit {
         Objects.requireNonNull(window, "window");
         if (permits < 1) {
@@ -21,20 +26,23 @@ public record RateLimit(long permits, Duration window) {
             throw new IllegalArgumentException("window must be positive: " + window);
         }
         if (window.toNanos() < permits) {
-            // Below 1 token per nanosecond the integer refill math in TokenBucket degenerates.
+            // Faster than one token per nanosecond, TokenBucket's whole-number refill math would break.
             throw new IllegalArgumentException("more than one permit per nanosecond is not supported");
         }
     }
 
+    /** Shortcut for "{@code permits} per second". */
     public static RateLimit perSecond(long permits) {
         return new RateLimit(permits, Duration.ofSeconds(1));
     }
 
+    /** Shortcut for "{@code permits} per minute". */
     public static RateLimit perMinute(long permits) {
         return new RateLimit(permits, Duration.ofMinutes(1));
     }
 
-    long windowNanos() {
+    /** Returns the window length in nanoseconds, the unit all the algorithms work in. */
+    public long windowNanos() {
         return window.toNanos();
     }
 }

@@ -1,11 +1,6 @@
 # Topic 12: Common Mistakes, Mined From Real Reviews (and the Fixes That Were Also Wrong)
 
-The old review set in this folder (`review-*_old.md`, `REVIEW-SUMMARY_old.md`) graded 11 generated
-LLD solutions, and the same defects came up again and again. This topic turns that catalogue into
-code. Every mistake gets a deterministic test that reproduces it, and a fix with a test that
-proves it. It also corrects the reviews themselves. Several of their recommended fixes were
-incomplete or wrong in ways an interviewer would catch, and **knowing why the "obvious fix" is
-wrong is the staff signal**.
+The old review set in this folder (`review-*_old.md`, `REVIEW-SUMMARY_old.md`) graded 11 generated LLD solutions, and the same defects came up again and again. This topic turns that catalogue into code. Every mistake gets a deterministic test that reproduces it, and a fix with a test that proves it. It also corrects the reviews themselves. Several of their recommended fixes were incomplete or wrong in ways an interviewer would catch, and **knowing why the "obvious fix" is wrong is the staff signal**.
 
 ## Table of Contents
 
@@ -33,8 +28,7 @@ What the old reviews found, how often, and where this guide now covers each one:
 | Read → write lock "upgrade" in the LRU cache | LRU (graded "critical") | **M1–M3** here |
 | Multi-object transfers | ATM, wallet | [Topic 08](../08-multi-object-atomicity/) |
 
-Frequencies are as reported in `REVIEW-SUMMARY_old.md`. They count the 11 systems actually reviewed,
-not the 33 that `FINAL-REVIEW-REPORT_old.md` extrapolated to.
+Frequencies are as reported in `REVIEW-SUMMARY_old.md`. They count the 11 systems actually reviewed, not the 33 that `FINAL-REVIEW-REPORT_old.md` extrapolated to.
 
 ### The fixes that were themselves wrong
 
@@ -56,26 +50,28 @@ not the 33 that `FINAL-REVIEW-REPORT_old.md` extrapolated to.
 
 ### M1: read → write lock "upgrade"
 
+Worked example of the gap. Two threads ask for key "k", which is not cached yet:
+
+| Step | Thread A | Thread B | Loads so far |
+|---|---|---|---|
+| 1 | read lock, sees "missing", releases it | read lock, sees "missing", releases it | 0 |
+| 2 | takes the write lock, loads, stores | waits for the write lock | 1 |
+| 3 | releases the write lock | takes the write lock, loads again without checking | 2 |
+
+The fix is a re-check in step 3: B looks again, finds A's value, and skips the load.
+
 ```java
 lock.readLock().lock();
 lock.writeLock().lock();     // blocks FOREVER, even in one thread: the write lock waits for all readers, including you
 ```
 
-- `ReentrantReadWriteLock` supports **downgrade** (write → read), never upgrade. The test proves
-  it without hanging: holding the read lock, `writeLock().tryLock()` returns `false`.
-- The workaround people write is release-read then acquire-write. That avoids the deadlock and
-  opens a gap. In `NoRecheckLazyCache`, two threads miss, meet in the gap (a `CyclicBarrier`),
-  and **both load**. `RecheckingLazyCache` re-checks under the write lock and loads once. This is
-  the `CachedData` example in the JDK Javadoc.
+- `ReentrantReadWriteLock` supports **downgrade** (write → read), never upgrade. The test proves it without hanging: holding the read lock, `writeLock().tryLock()` returns `false`.
+- The workaround people write is release-read then acquire-write. That avoids the deadlock and opens a gap. In `NoRecheckLazyCache`, two threads miss, meet in the gap (a `CyclicBarrier`), and **both load**. `RecheckingLazyCache` re-checks under the write lock and loads once. This is the `CachedData` example in the JDK Javadoc.
 - Usually the real answer is `ConcurrentHashMap.computeIfAbsent`: one call, per-key, no RW lock.
 
 ### M2: in an LRU, `get` is a write
 
-`LinkedHashMap(…, accessOrder = true)` relinks the entry on every `get`. The test shows this on a
-single thread: calling `get` while iterating throws `ConcurrentModificationException`. So a read
-lock around `get` lets two "readers" relink the same list concurrently. `LruCache` uses one plain
-`ReentrantLock`, with `removeEldestEntry` for eviction. A test runs 8 threads × 50k mixed ops
-and the size stays exactly at capacity.
+`LinkedHashMap(…, accessOrder = true)` relinks the entry on every `get`. The test shows this on a single thread: calling `get` while iterating throws `ConcurrentModificationException`. So a read lock around `get` lets two "readers" relink the same list concurrently. `LruCache` uses one plain `ReentrantLock`, with `removeEldestEntry` for eviction. A test runs 8 threads × 50k mixed ops and the size stays exactly at capacity.
 
 ### M3: segmented LRU is a trade-off
 
@@ -86,25 +82,19 @@ true LRU (cap 4):   [0, 2, 4]         size 3, nothing evicted
 segmented (2 × 2):  seg0 [2, 4]  seg1 []     key 0 evicted while half the cache is empty
 ```
 
-A second test shows **order** loss. Key 1 is the oldest entry overall, but it survives while a
-newer key in segment 0 is evicted.
+A second test shows **order** loss. Key 1 is the oldest entry overall, but it survives while a newer key in segment 0 is evicted.
 
 ### M4: `StampedLock` optimistic read, done right
 
-The correct pattern (from the `StampedLock` Javadoc) is to read fields **into locals**, then
-`validate(stamp)`, then fall back to a read lock if validation fails. Use the locals only after
-validating. `UnvalidatedOptimisticPoint` skips `validate`, and a write inside the reader's gap
-returns `{1, 20}`, a pair that never existed. The test is deterministic and single-threaded,
-because an optimistic read holds no lock, so the writer can run inside the gap on the same
-thread. `StampedLock` is also **not reentrant**. Use it only for read-mostly state where a read
-doesn't mutate anything, which rules out an LRU.
+The correct pattern (from the `StampedLock` Javadoc) is to read fields **into locals**, then `validate(stamp)`, then fall back to a read lock if validation fails. Use the locals only after validating. `UnvalidatedOptimisticPoint` skips `validate`, and a write inside the reader's gap returns `{1, 20}`, a pair that never existed. The test is deterministic and single-threaded, because an optimistic read holds no lock, so the writer can run inside the gap on the same thread. `StampedLock` is also **not reentrant**. Use it only for read-mostly state where a read doesn't mutate anything, which rules out an LRU.
 
 ### M5: `CopyOnWriteArrayList` and check-then-act
 
-The barrier forces two threads through `contains` before either `add`s, and the list ends up with
-the URL twice. `addIfAbsent` does the check and the add under the list's lock.
+The barrier forces two threads through `contains` before either `add`s, and the list ends up with the URL twice. `addIfAbsent` does the check and the add under the list's lock.
 
 ### M6: money as `double`
+
+Worked example. Split $100.00 three ways. Each share is rounded to cents on its own, so 100.00 / 3 = 33.33 three times, and 3 × 33.33 = 99.99. One cent is gone. With largest remainder in cents: 10,000 cents gives floors 3,333 × 3 = 9,999, one cent is left over, and it goes to the first share, so the result is [3334, 3333, 3333] and the sum is exact.
 
 | Amount / 3, rounded per share | Sum | Error | Passes `assertEquals(total, sum, 0.01)`? |
 |---|---|---|---|
@@ -113,12 +103,7 @@ the URL twice. `addIfAbsent` does the check and the add under the list's lock.
 | $100.00 | 99.99 | −1¢ | no (diff 0.010000000000005116) |
 | $1,000.00 | 999.99 | −1¢ | **yes** |
 
-Measured with jshell on JDK 21. The same one-cent bug passes or fails the tolerance test depending
-on the amount. The fix is `MoneySplit`: `long` minor units with the **largest-remainder** method.
-Floors first, then the leftover units go to the largest fractional remainders (ties to the lower
-index, for determinism). `equally(10_000, 3)` gives `[3334, 3333, 3333]`. A property test runs
-10,000 random totals and weight sets and checks that the sum is **exact** and that every share is
-within 1 unit of its exact proportion. Overflow throws `ArithmeticException` instead of wrapping.
+Measured with jshell on JDK 21. The same one-cent bug passes or fails the tolerance test depending on the amount. The fix is `MoneySplit`: `long` minor units with the **largest-remainder** method. Floors first, then the leftover units go to the largest fractional remainders (ties to the lower index, for determinism). `equally(10_000, 3)` gives `[3334, 3333, 3333]`. A property test runs 10,000 random totals and weight sets and checks that the sum is **exact** and that every share is within 1 unit of its exact proportion. Overflow throws `ArithmeticException` instead of wrapping.
 
 ### M7: listener isolation
 
@@ -128,26 +113,18 @@ within 1 unit of its exact proportion. Overflow throws `ArithmeticException` ins
 | One-shot listener unsubscribes itself, 2 listeners | **the last listener is silently skipped**, with no exception (iterator sees `cursor == size`) | both run; removal takes effect next publish |
 | Same, 3 listeners | `ConcurrentModificationException` | fine |
 
-The silent skip in the middle row was found by testing. The first version of this test expected a
-CME and failed.
+The silent skip in the middle row was found by testing. The first version of this test expected a CME and failed.
 
 ### M8: mutability leaks
 
-- `LeakyCart.items()` returns the internal list, so a caller can `add` past the max-items
-  invariant.
-- `itemsView()` (`unmodifiableList`) blocks writes, but it's live: the caller's "read-only" list
-  grows, and iterating it while the cart changes throws a CME.
+- `LeakyCart.items()` returns the internal list, so a caller can `add` past the max-items invariant.
+- `itemsView()` (`unmodifiableList`) blocks writes, but it's live: the caller's "read-only" list grows, and iterating it while the cart changes throws a CME.
 - `Cart.items()` returns `List.copyOf(...)`, which is unmodifiable and detached.
-- `OrderSnapshot` is a **record** that copies its list in the compact constructor. Without that,
-  the "immutable" record shares the caller's `ArrayList`. `List.copyOf` also rejects `null`
-  elements.
+- `OrderSnapshot` is a **record** that copies its list in the compact constructor. Without that, the "immutable" record shares the caller's `ArrayList`. `List.copyOf` also rejects `null` elements.
 
 ### M9: two `volatile` fields aren't one state
 
-`TwoVolatileSpot` writes `occupied = true`, then `vehicle = v`. A reader in between sees
-**"occupied, by nobody"**. Each field is visible; the pair isn't atomic. `AtomicSpot` makes the
-occupant reference *be* the state (`null` = free), so one `compareAndSet(null, v)` both checks and
-acts. For more than one field, put them in an immutable record and CAS the record.
+`TwoVolatileSpot` writes `occupied = true`, then `vehicle = v`. A reader in between sees **"occupied, by nobody"**. Each field is visible; the pair isn't atomic. `AtomicSpot` makes the occupant reference *be* the state (`null` = free), so one `compareAndSet(null, v)` both checks and acts. For more than one field, put them in an immutable record and CAS the record.
 
 ### Code and tests
 
@@ -162,9 +139,7 @@ acts. For more than one field, put them in an immutable record and CAS the recor
 | M8 | [`LeakyCart`](src/main/java/com/lld/mistakes/LeakyCart.java) | [`Cart`](src/main/java/com/lld/mistakes/Cart.java), [`OrderSnapshot`](src/main/java/com/lld/mistakes/OrderSnapshot.java) | [`MutabilityTest`](src/test/java/com/lld/mistakes/MutabilityTest.java) |
 | M9 | [`TwoVolatileSpot`](src/main/java/com/lld/mistakes/TwoVolatileSpot.java) | [`AtomicSpot`](src/main/java/com/lld/mistakes/AtomicSpot.java) | [`ParkingSpotTest`](src/test/java/com/lld/mistakes/ParkingSpotTest.java) |
 
-30 tests, green 3 runs in a row. Every bug test is deterministic: a barrier, a same-thread
-probe in a `Gap`, or plain single-threaded behaviour. None of them relies on luck. Run them:
-[`commands.md`](commands.md).
+30 tests, green 3 runs in a row. Every bug test is deterministic: a barrier, a same-thread probe in a `Gap`, or plain single-threaded behaviour. None of them relies on luck. Run them: [`commands.md`](commands.md).
 
 ---
 
@@ -172,24 +147,16 @@ probe in a `Gap`, or plain single-threaded behaviour. None of them relies on luc
 
 ### Misconceptions
 
-- **"Thread-safe collection = thread-safe code."** Calls are atomic, sequences aren't (M5, and
-  Topic 07).
-- **"A read-write lock is faster."** Only when reads truly don't mutate, are long enough to
-  amortise the more expensive lock, and outnumber writes heavily. Measure it. For short critical
-  sections a plain lock often wins.
-- **"Optimistic reads are free."** They're free when they succeed. Every failed `validate` costs
-  the optimistic attempt plus a real read lock, and the code is harder to get right (M4).
-- **"Tolerance-based asserts are fine for money."** They make the test depend on floating-point
-  luck (M6). Money tests should be exact.
-- **"Records are immutable."** Only shallowly. A `List` component is as mutable as the list you
-  passed in (M8).
-- **"Swallow listener exceptions so the publisher is safe."** Swallowing hides the failure.
-  Isolate it **and report it** (M7).
+- **"Thread-safe collection = thread-safe code."** Calls are atomic, sequences aren't (M5, and Topic 07).
+- **"A read-write lock is faster."** Only when reads truly don't mutate, are long enough to amortise the more expensive lock, and outnumber writes heavily. Measure it. For short critical sections a plain lock often wins.
+- **"Optimistic reads are free."** They're free when they succeed. Every failed `validate` costs the optimistic attempt plus a real read lock, and the code is harder to get right (M4).
+- **"Tolerance-based asserts are fine for money."** They make the test depend on floating-point luck (M6). Money tests should be exact.
+- **"Records are immutable."** Only shallowly. A `List` component is as mutable as the list you passed in (M8).
+- **"Swallow listener exceptions so the publisher is safe."** Swallowing hides the failure. Isolate it **and report it** (M7).
 
 ### Review hygiene: how to write a review that holds up
 
-The old reviews graded 22 of 33 systems by extrapolation and quoted performance numbers no one
-had measured. For your own review answers in an interview ("what's wrong with this code?"):
+The old reviews graded 22 of 33 systems by extrapolation and quoted performance numbers no one had measured. For your own review answers in an interview ("what's wrong with this code?"):
 
 1. Name the **invariant** that breaks, not a category ("thread-safety issue").
 2. Give the **interleaving** or input that breaks it.
@@ -198,36 +165,25 @@ had measured. For your own review answers in an interview ("what's wrong with th
 
 ### When NOT to apply these fixes
 
-- **Single-threaded by agreement.** If the interviewer said single-threaded, don't add locks.
-  Name the one place you would.
-- **Library available.** In production, use Caffeine for caches and an established bus. Write
-  your own only to show you understand what the library does for you.
+- **Single-threaded by agreement.** If the interviewer said single-threaded, don't add locks. Name the one place you would.
+- **Library available.** In production, use Caffeine for caches and an established bus. Write your own only to show you understand what the library does for you.
 
 ### Interview move
 
-When asked to review code, go through M1–M9 as a checklist: compound ops, lock scope, RW/upgrade,
-returned collections, money type, listener loop, related fields. Then state the cost of each fix.
+When asked to review code, go through M1–M9 as a checklist: compound ops, lock scope, RW/upgrade, returned collections, money type, listener loop, related fields. Then state the cost of each fix.
 
 ---
 
 ## 4. Official References
 
-- `ReentrantReadWriteLock` (no upgrade; downgrade allowed; the `CachedData` re-check example):
-  https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/locks/ReentrantReadWriteLock.html
-- `StampedLock` (optimistic read pattern; not reentrant):
-  https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/locks/StampedLock.html
-- `LinkedHashMap` (access order makes `get` a structural modification; `removeEldestEntry`):
-  https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/LinkedHashMap.html
-- `CopyOnWriteArrayList.addIfAbsent`:
-  https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CopyOnWriteArrayList.html#addIfAbsent(E)
-- `List.copyOf` vs `Collections.unmodifiableList` (snapshot vs view):
-  https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html#copyOf(java.util.Collection)
-- JLS §8.10, records (the compact canonical constructor):
-  https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.10
-- JUnit `Assertions.assertEquals(double, double, double)` (delta semantics):
-  https://docs.junit.org/current/api/org.junit.jupiter.api/org/junit/jupiter/api/Assertions.html
-- Caffeine design (read buffers instead of read locks for LRU-ish policies):
-  https://github.com/ben-manes/caffeine/wiki/Design
+- `ReentrantReadWriteLock` (no upgrade; downgrade allowed; the `CachedData` re-check example): https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/locks/ReentrantReadWriteLock.html
+- `StampedLock` (optimistic read pattern; not reentrant): https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/locks/StampedLock.html
+- `LinkedHashMap` (access order makes `get` a structural modification; `removeEldestEntry`): https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/LinkedHashMap.html
+- `CopyOnWriteArrayList.addIfAbsent`: https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CopyOnWriteArrayList.html#addIfAbsent(E)
+- `List.copyOf` vs `Collections.unmodifiableList` (snapshot vs view): https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/List.html#copyOf(java.util.Collection)
+- JLS §8.10, records (the compact canonical constructor): https://docs.oracle.com/javase/specs/jls/se21/html/jls-8.html#jls-8.10
+- JUnit `Assertions.assertEquals(double, double, double)` (delta semantics): https://docs.junit.org/current/api/org.junit.jupiter.api/org/junit/jupiter/api/Assertions.html
+- Caffeine design (read buffers instead of read locks for LRU-ish policies): https://github.com/ben-manes/caffeine/wiki/Design
 - Largest remainder method: https://en.wikipedia.org/wiki/Largest_remainders_method
 
 ---
@@ -237,11 +193,9 @@ returned collections, money type, listener loop, related fields. Then state the 
 1. RW locks never upgrade. Release, acquire, and **re-check**, or use `computeIfAbsent`.
 2. In an LRU, `get` is a write. One plain lock is the correct baseline.
 3. A segmented LRU isn't an LRU. Present it as a trade-off.
-4. Optimistic read means copy, then `validate`, then fall back. Never use the values before
-   validating.
+4. Optimistic read means copy, then `validate`, then fall back. Never use the values before validating.
 5. COW lists are for listeners. They're O(n) per write and still check-then-act unsafe.
-6. Money is `long` minor units, splits use largest remainder, and asserts are exact. A 0.01 delta
-   is luck.
+6. Money is `long` minor units, splits use largest remainder, and asserts are exact. A 0.01 delta is luck.
 7. Listener loops isolate **and report** failures, and iterate over a snapshot.
 8. Return snapshots (`List.copyOf`), not views, and copy in record constructors.
 9. Related fields form one state. Use one CAS or one lock, never two volatiles.
@@ -249,10 +203,6 @@ returned collections, money type, listener loop, related fields. Then state the 
 
 ---
 
-**Self-grade: STRONG.** Nine mistakes mined from real reviews, each with a deterministic
-reproducing test and a proven fix. A correction table for the reviews' own wrong fixes, two of
-them found only by measuring (the FP-tolerance luck and the silent listener skip). Review hygiene
-and a checklist for interview code reviews. Gap: no JMH numbers for RW lock vs plain lock vs
-Caffeine. The claim that RW locks often lose is stated, not measured here.
+**Self-grade: STRONG.** Nine mistakes mined from real reviews, each with a deterministic reproducing test and a proven fix. A correction table for the reviews' own wrong fixes, two of them found only by measuring (the FP-tolerance luck and the silent listener skip). Review hygiene and a checklist for interview code reviews. Gap: no JMH numbers for RW lock vs plain lock vs Caffeine. The claim that RW locks often lose is stated, not measured here.
 
 [← Topic 11: Money, IDs & Idempotency](../11-money-ids-idempotency/) · [Index](../README.md) · [Topic 13: From LLD to HLD →](../13-lld-to-hld-seams/)

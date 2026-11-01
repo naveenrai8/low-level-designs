@@ -23,8 +23,7 @@ EOF
 "$JAVA_HOME/bin/jshell" -q /tmp/fp.jsh
 ```
 
-Measured output (JDK 21.0.8): $1.00, $50.00 and $100.00 fail the tolerance check, while $10.00,
-$20.00 and $1,000.00 pass. Every one of them is off by exactly one cent.
+Measured output (JDK 21.0.8): $1.00, $50.00 and $100.00 fail the tolerance check, while $10.00, $20.00 and $1,000.00 pass. Every one of them is off by exactly one cent.
 
 Reproduce the M7 iterator quirk:
 

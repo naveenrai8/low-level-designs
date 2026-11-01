@@ -1,19 +1,19 @@
 package com.lld.ratelimiter;
 
 /**
- * A monotonic nanosecond time source.
+ * A clock that only moves forward, counted in nanoseconds.
  *
- * <p>Rate limiters measure <em>elapsed</em> time, so they need a monotonic clock
- * ({@link System#nanoTime()}), not wall-clock time ({@code Clock}/{@code Instant}), which NTP can
- * move backwards. Injecting it is also what makes every test in this module deterministic: tests
- * advance a fake ticker instead of sleeping.
+ * <p>A rate limiter cares about <em>how much time has passed</em>, so it needs a clock that never jumps backwards ({@link System#nanoTime()}). Wall-clock time ({@code Clock}/{@code Instant}) can be moved backwards by time sync, so it is the wrong tool here.
+ *
+ * <p>Passing the clock in is also what makes every test here repeatable: tests move a fake ticker forward instead of sleeping.
  */
 @FunctionalInterface
 public interface Ticker {
 
-    /** Nanoseconds from an arbitrary fixed origin. Only differences between readings are meaningful. */
+    /** Returns the current reading in nanoseconds. The starting point is arbitrary, so only the difference between two readings means anything. */
     long read();
 
+    /** Returns the real clock, {@link System#nanoTime()}, for production use. */
     static Ticker system() {
         return System::nanoTime;
     }
